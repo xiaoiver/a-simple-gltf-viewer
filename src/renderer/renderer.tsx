@@ -1,6 +1,7 @@
 /**
  * React renderer.
  */
+import { load } from '@/loader';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 
@@ -14,3 +15,6 @@ ReactDOM.render(
   </div>,
   document.getElementById('app')
 );
+
+// load('https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BoxTextured/glTF/BoxTextured.gltf');
+load('https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Triangle/glTF/Triangle.gltf');

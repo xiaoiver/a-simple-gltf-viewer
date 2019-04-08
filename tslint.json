@@ -31,7 +31,7 @@
     "no-import-side-effect": [
       true,
       {
-        "ignore-module": "(\\.css)$"
+        "ignore-module": "(\\.css)$|reflect-metadata",
       }
     ],
     "no-increment-decrement": ["allow-for-loops"],

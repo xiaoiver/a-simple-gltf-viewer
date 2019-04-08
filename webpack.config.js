@@ -35,6 +35,10 @@ const commonConfig = {
         loader: 'ts-loader',
       },
       {
+        test: /\.(glsl)$/,
+        loader: 'raw-loader',
+      },
+      {
         test: /\.(scss|css)$/,
         use: ['style-loader', 'css-loader'],
       },
