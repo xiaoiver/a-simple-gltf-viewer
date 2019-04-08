@@ -1,3 +1,16 @@
 .app {
   color: grey;
 }
+
+/* dat.ui */
+.dg.ac {
+  z-index: 1;
+}
+
+#viewer-container {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+}

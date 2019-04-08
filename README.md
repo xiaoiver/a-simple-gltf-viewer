@@ -1,6 +1,6 @@
 # a-simple-gltf-viewer
 
-Just a simple glTF viewer inspired by [glTF-WebGL-PBR](https://github.com/KhronosGroup/glTF-WebGL-PBR/).
+Just a simple glTF viewer inspired by [glTF-WebGL-PBR](https://github.com/KhronosGroup/glTF-WebGL-PBR/) & [MARMOSET VIEWER](https://marmoset.co/viewer/).
 
 Features:
 * PBR
@@ -8,6 +8,16 @@ Features:
 * Use [InversifyJS](https://github.com/inversify/InversifyJS) as an IoC container.
 * Use [gltf-loader-ts](https://github.com/bwasty/gltf-loader-ts/) to load external assets.
 * Also based on [electron-react-typescript-webpack-boilerplate](https://github.com/Devtography/electron-react-typescript-webpack-boilerplate).
+
+TODO:
+* Support [skin](https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#skin).
+* Timeline & [animation](https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#animations).
+* Support [Camera](https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#cameras).
+* Soft Shadow
+* Use some PWA features to cache glTF model.
+* Add more post-processing such as FXAA.
+* Support drag & drop when uploading glTF model.
+* Handle [context loss](https://github.com/regl-project/regl/blob/gh-pages/API.md#context-loss).
 
 ## Getting started
 

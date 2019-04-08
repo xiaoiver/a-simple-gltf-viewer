@@ -3,29 +3,45 @@
  * @see https://github.com/regl-project/regl/blob/gh-pages/API.md
  */
 import * as regl from 'regl';
+import * as Stats from 'stats.js';
 import { inject, injectable } from 'inversify';
 import { EventEmitter } from 'eventemitter3';
-import { SERVICE_IDENTIFIER } from '@/services/constants';
+import { SERVICE_IDENTIFIER, MIN_FILTER, MAG_FILTER, WRAP_S, WRAP_T } from '@/services/constants';
 import { ISceneService } from '@/services/SceneService';
-import { ICameraService } from '@/services/Camera';
+// @ts-ignore
 import vert from '@/shaders/vert.glsl';
+// @ts-ignore
 import frag from '@/shaders/frag.glsl';
-import * as Stats from 'stats.js';
-import { mat4 } from 'gl-matrix';
-import { BufferView } from 'gltf-loader-ts/lib/gltf';
-import { IMouseService, Mouse, MouseData } from '@/services/Mouse';
+import { Sampler } from 'gltf-loader-ts/lib/gltf';
+import { loadImage } from '@/utils/asset';
+import { IGltfService } from './GltfService';
 
 export interface IRendererService {
     on(name: string, cb: Function): void;
+    init(container: string): void;
     render(): void;
     getCanvas(): HTMLCanvasElement;
-    addAttribute(attributeName: string, value: Uint8Array, bufferView: BufferView): void;
+    addAttribute(attributeName: string, data: any, offset: number|undefined, stride: number|undefined): void;
     addDefine(defineName: string, value: number): void;
     addUniform(uniformName: string, value: any, type?: string): void;
-    setIndices(indices: Uint8Array, bufferView: BufferView): void;
+    setIndices(indices: Uint8Array | Uint16Array | Float32Array | undefined): void;
     setCullFace(enabled: boolean): void;
     callDrawCommand(body?: regl.CommandBodyFn<regl.DefaultContext, {}> | undefined): void;
+    isSupportSRGB(): boolean;
 }
+
+const defaultDefines = {
+    USE_IBL: 0,
+    HAS_NORMALS: 0,
+    HAS_TANGENTS: 0,
+    HAS_UV: 0,
+    HAS_BASECOLORMAP: 0,
+    HAS_METALROUGHNESSMAP: 0,
+    HAS_NORMALMAP: 0,
+    MANUAL_SRGB: 0,
+    HAS_EMISSIVEMAP: 0,
+    HAS_OCCLUSIONMAP: 0
+};
 
 @injectable()
 export class Renderer extends EventEmitter implements IRendererService {
@@ -39,30 +55,16 @@ export class Renderer extends EventEmitter implements IRendererService {
     private canvas: HTMLCanvasElement;
     private indices: {
         data: Uint8Array;
-        bufferView: BufferView;
     };
-    private attributes = {};
-    private uniforms = {};
-    private defines: {
-        USE_IBL: number;
-        HAS_NORMALS: number;
-        HAS_TANGENTS: number;
-        HAS_UV: number;
-        HAS_BASECOLORMAP: number;
-        HAS_METALROUGHNESSMAP: number;
-    } = {
-        USE_IBL: 0,
-        HAS_NORMALS: 0,
-        HAS_TANGENTS: 0,
-        HAS_UV: 0,
-        HAS_BASECOLORMAP: 0,
-        HAS_METALROUGHNESSMAP: 0
-    };
+    private attributes: {[key: string]: any} = {};
+    private uniforms: {[key: string]: any} = {};
+    private defines: {[key: string]: number} = {...defaultDefines};
     private cullFace: boolean = true;
+    private supportSRGB: boolean = false;
+    private inited: boolean = false;
 
     @inject(SERVICE_IDENTIFIER.SceneService) private _scene: ISceneService;
-    @inject(SERVICE_IDENTIFIER.CameraService) private _camera: ICameraService;
-    @inject(SERVICE_IDENTIFIER.MouseService) private _mouse: IMouseService;
+    @inject(SERVICE_IDENTIFIER.GltfService) private _gltf: IGltfService;
 
     private initStats() {
         this.stats = new Stats();
@@ -83,32 +85,32 @@ export class Renderer extends EventEmitter implements IRendererService {
         ${glsl}`;
     }
 
-    private initDrawCommand() {
+    private createDrawCommand() {
         this.draw = this._regl({
             vert: this.prefixDefines(vert),
             frag: this.prefixDefines(frag),
             attributes: this.attributes,
             uniforms: {
-                u_LightDirection: [0, 0.5, 0.5],
+                u_LightDirection: [0, 4, 4],
                 u_LightColor: [1, 1, 1],
+                // @ts-ignore
                 u_Camera: this._regl.prop('cameraPosition'),
+                // @ts-ignore
                 u_ModelMatrix: this._regl.prop('modelMatrix'),
+                // @ts-ignore
                 u_NormalMatrix: this._regl.prop('normalMatrix'),
+                // @ts-ignore
                 u_MVPMatrix: this._regl.prop('mvpMatrix'),
-                u_ScaleDiffBaseMR: [1, 1, 1, 1],
+                u_ScaleDiffBaseMR: [0, 0, 0, 0],
                 u_ScaleFGDSpec: [0, 0, 0, 0],
                 u_ScaleIBLAmbient: [1, 1, 0, 0],
-                u_MetallicRoughnessValues: [1, 1],
-                u_BaseColorFactor: [1, 1, 1, 1],
                 ...this.uniforms
             },
-            // cull: {
-            //     enable: this._regl.this('cullFace'),
-            //     face: 'back'
-            // },
-            // depth: {
-            //     enable: false
-            // },
+            cull: {
+                // @ts-ignore
+                enable: this._regl.this('cullFace'),
+                face: 'back'
+            },
             elements: this._regl.elements({
                 primitive: 'triangles',
                 data: this.indices.data
@@ -120,83 +122,97 @@ export class Renderer extends EventEmitter implements IRendererService {
         this.draw(body);
     }
 
-    private registerEventListeners(): void {
-        const canvas = this.getCanvas();
-        canvas.addEventListener('resize', () => {
-            if (this._camera.eye) {
-                this._camera.aspect = canvas.width / canvas.height;
-                this._camera.updateProjection();
-                this._camera.updateTransform();
-            }
-            this.emit(Renderer.RESIZE_EVENT);
-        });
-
-        this._mouse.on(Mouse.MOVE_EVENT, (data: MouseData) => {
-            const {deltaX, deltaY, deltaZ} = data;
-            const moveSpeed = 10;
-          
-            // if (isTruck) {
-            //   this._camera.pan(deltaX * 0.001 * moveSpeed);
-            //   this._camera.tilt(deltaY * 0.001 * moveSpeed);
-            //   this._camera.dolly(deltaZ * 0.05 * moveSpeed);
-            // } else {
-            this._camera.truck(-deltaX * 0.01 * moveSpeed);
-            this._camera.pedestal(deltaY * 0.01 * moveSpeed);
-            this._camera.cant(deltaZ * 0.05 * moveSpeed);
-            // }
-        });
-    }
-
-    private async init(): Promise<void> {
+    public async init(container: string): Promise<void> {
         this.initStats();
-        
-        // create a fullscreen canvas
-        await new Promise((resolve, reject) => {
-            this._regl = regl({
-                extensions: [
-                    'EXT_shader_texture_lod',
-                    'OES_standard_derivatives'
-                ],
-                // profile: true,
-                onDone: (err, _regl) => {
-                    if (err) {
-                        console.log(err);
-                        reject(err);
-                        return;
+
+        const $container = document.getElementById(container);
+        if ($container) {
+            // create a fullscreen canvas
+            this._regl = await new Promise((resolve, reject) => {
+                regl({
+                    container: $container,
+                    extensions: [
+                        'EXT_shader_texture_lod',
+                        'OES_standard_derivatives',
+                        'EXT_SRGB'
+                    ],
+                    // profile: true,
+                    onDone: (err, _regl) => {
+                        if (err || !_regl) {
+                            console.log(err);
+                            reject(err);
+                            return;
+                        }
+
+                        if (_regl.hasExtension('EXT_SRGB')) {
+                            this.supportSRGB = true;
+                        }
+
+                        resolve(_regl);
+                        this.canvas = $container.getElementsByTagName('canvas')[0];
+                        this.emit(Renderer.READY_EVENT);
                     }
-                    resolve();
-                    this.emit(Renderer.READY_EVENT);
-                }
+                });
             });
-        });
 
-        await this._scene.init();
-
-        this.initDrawCommand();
-
-        this.registerEventListeners();
+            window.addEventListener('resize', () => {
+                this.emit(Renderer.RESIZE_EVENT, [{
+                    width: this.canvas.width,
+                    height: this.canvas.height
+                }]);
+            });            
+        } else {
+            throw new Error(`${container} container is not exist.`);
+        }
     }
 
     public setCullFace(enabled: boolean) {
         this.cullFace = enabled;
     }
 
-    public setIndices(indices: Uint8Array, bufferView: BufferView) {
+    public setIndices(indices: Uint8Array) {
         this.indices = {
-            data: indices,
-            bufferView
-        }
-    }
-
-    public addAttribute(attributeName: string, value: Uint8Array, bufferView: BufferView) {
-        this.attributes[attributeName] = {
-            buffer: this._regl.buffer(value),
+            data: indices
         };
     }
 
-    public addUniform(uniformName: string, value: any, type?: string) {
+    public addAttribute(attributeName: string, data: any, offset: number|undefined, stride: number|undefined) {
+        this.attributes[attributeName] = {
+            buffer: this._regl.buffer(data)
+        };
+        if (offset !== undefined) {
+            this.attributes[attributeName].offset = offset;
+        }
+        if (stride !== undefined) {
+            this.attributes[attributeName].stride = stride;
+        }
+    }
+
+    public addUniform(uniformName: string,
+        value: { image: HTMLImageElement, sampler: Sampler, format: regl.TextureFormatType },
+        type?: string) {
         if (type === 'texture') {
-            this.uniforms[uniformName] = this._regl.texture(value);
+            const { image, sampler, format = 'rgba' } = value;
+            const textureParams: Partial<regl.Texture2DOptions> = {
+                data: image,
+                format
+            };
+
+            if (sampler) {
+                if (sampler.minFilter !== undefined) {
+                    textureParams.min = MIN_FILTER[sampler.minFilter];
+                }
+                if (sampler.magFilter !== undefined) {
+                    textureParams.mag = MAG_FILTER[sampler.magFilter];
+                }
+                if (sampler.wrapS !== undefined) {
+                    textureParams.wrapS = WRAP_S[sampler.wrapS];
+                }
+                if (sampler.wrapT !== undefined) {
+                    textureParams.wrapT = WRAP_T[sampler.wrapT];
+                }
+                this.uniforms[uniformName] = this._regl.texture(textureParams);
+            }
         } else {
             this.uniforms[uniformName] = value;
         }
@@ -207,24 +223,56 @@ export class Renderer extends EventEmitter implements IRendererService {
     }
 
     public getCanvas() {
-        if (!this.canvas) {
-            this.canvas = document.getElementsByTagName('canvas')[0];
-        }
         return this.canvas;
     }
 
-    public async render() {
-        await this.init();
-        this._regl.frame(() => {
-            this._regl.clear({
-                color: [0, 0, 0, 1],
-                // depth: 1,
-                stencil: 0
-            });
+    public isSupportSRGB() {
+        return this.supportSRGB;
+    }
 
-            this.stats.update();
-            this._scene.draw();
-            this.emit(Renderer.FRAME_EVENT);
-        });
+    private async loadBrdfLUT() {
+        // brdfLUT
+        const image = await loadImage('textures/brdfLUT.png');
+        const sampler = this._gltf.getSampler(0);
+        this.addUniform('brdfLUT', {
+            image, sampler,
+            format: this.isSupportSRGB ? 'srgb' : 'rgba'
+        }, 'texture');
+    }
+
+    private clean() {
+        this.attributes = {};
+        this.uniforms = {};
+        this.defines = { ...defaultDefines };
+    }
+
+    public async render() {
+        this.clean();
+
+        await this._scene.init();
+
+        this.createDrawCommand();
+
+        const canvas = this.getCanvas();
+        this.emit(Renderer.RESIZE_EVENT, [{
+            width: canvas.width,
+            height: canvas.height
+        }]);
+
+        if (!this.inited) {
+            await this.loadBrdfLUT();
+
+            this._regl.frame(() => {
+                this._regl.clear({
+                    color: [0, 0, 0, 1],
+                    stencil: 0
+                });
+
+                this.stats.update();
+                this._scene.draw();
+                this.emit(Renderer.FRAME_EVENT);
+            });
+            this.inited = true;
+        }
     }
 }

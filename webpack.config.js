@@ -1,5 +1,6 @@
 const lodash = require('lodash');
 const CopyPkgJsonPlugin = require('copy-pkg-json-webpack-plugin');
+const CopyPlugin = require('copy-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const path = require('path');
 
@@ -77,6 +78,9 @@ rendererConfig.plugins = [
   new HtmlWebpackPlugin({
     template: path.resolve(__dirname, './public/index.html'),
   }),
+  new CopyPlugin([
+    { from: srcPaths('public/textures'), to: srcPaths('dist') },
+  ])
 ];
 
 module.exports = [mainConfig, rendererConfig];

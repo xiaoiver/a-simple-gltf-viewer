@@ -3,6 +3,7 @@ import { EventEmitter } from 'eventemitter3';
 import { IRendererService, Renderer } from './Renderer';
 import { SERVICE_IDENTIFIER } from '@/services/constants';
 import * as Hammer from 'hammerjs';
+import { ICameraService } from './Camera';
 
 export interface IMouseService {
     on(name: string, cb: Function): void;
@@ -17,6 +18,7 @@ export interface MouseData {
 @injectable()
 export class Mouse extends EventEmitter implements IMouseService {
     private renderer: IRendererService;
+    private camera: ICameraService;
 
     private isMoving: boolean = false;
     private lastX: number = -1;
@@ -32,10 +34,12 @@ export class Mouse extends EventEmitter implements IMouseService {
     static WHEEL_EVENT = 'mousewheel';
 
     constructor(
-        @inject(SERVICE_IDENTIFIER.RendererService) _renderer: IRendererService
+        @inject(SERVICE_IDENTIFIER.RendererService) _renderer: IRendererService,
+        @inject(SERVICE_IDENTIFIER.CameraService) _camera: ICameraService
     ) {
         super();
         this.renderer = _renderer;
+        this.camera = _camera;
         this.onPanstart = this.onPanstart.bind(this);
         this.onPanmove = this.onPanmove.bind(this);
         this.onPanend = this.onPanend.bind(this);
@@ -55,6 +59,15 @@ export class Mouse extends EventEmitter implements IMouseService {
 
             canvas.addEventListener('wheel', this.onMousewheel);
         });
+
+        this.on(Mouse.MOVE_EVENT, (data: MouseData) => {
+            const { deltaX, deltaY, deltaZ } = data;
+            const moveSpeed = 2;
+            
+            this.camera.roll(deltaX * 0.001 * moveSpeed);
+            this.camera.pitch(deltaY * 0.001 * moveSpeed);
+            this.camera.dolly(deltaZ * 0.05 * moveSpeed);
+        })
     }
 
     onPanend(e: HammerInput) {

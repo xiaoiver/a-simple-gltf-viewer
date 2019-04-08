@@ -2,11 +2,11 @@
  * Scene
  */
 import { container } from '@/inversify.config';
-import { GlTf, Node, Scene } from 'gltf-loader-ts/lib/gltf';
+import { Node } from 'gltf-loader-ts/lib/gltf';
 import { inject, injectable } from 'inversify';
 import { SERVICE_IDENTIFIER } from '@/services/constants';
 import { IGltfService } from '@/services/GltfService';
-import { mat4, quat, vec3 } from 'gl-matrix';
+import { mat4 } from 'gl-matrix';
 import { ISceneNodeService, SceneNode } from '@/services/Node';
 
 export interface ISceneService {

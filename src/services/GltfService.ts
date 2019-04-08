@@ -1,9 +1,9 @@
 /**
  * provide raw scene & nodes data in glTF
  */
-import { inject, injectable } from 'inversify';
+import { injectable } from 'inversify';
 import { GltfAsset, GltfLoader, resolveURL } from 'gltf-loader-ts';
-import { GlTf, Node, Scene, Mesh, Material, Texture, Image, BufferView, Accessor, GlTfId } from 'gltf-loader-ts/lib/gltf';
+import { Node, Scene, Mesh, Material, Texture, BufferView, Accessor, GlTfId, Sampler } from 'gltf-loader-ts/lib/gltf';
 
 const loader: GltfLoader = new GltfLoader();
 
@@ -15,9 +15,11 @@ export interface IGltfService {
     getMaterial(idx: number): Material;
     getTexture(idx: number): Texture;
     getImage(idx: number): Promise<HTMLImageElement>;
+    getSampler(idx: number): Sampler;
     getData(idx: number): Promise<{
         data: Uint8Array|Uint16Array|Float32Array|undefined;
-        bufferView: BufferView;
+        offset: number | undefined;
+        stride: number | undefined;
     }>;
 }
 
@@ -30,15 +32,18 @@ export class GltfService implements IGltfService {
     private textures: Texture[] = [];
     private accessors: Accessor[] = [];
     private bufferViews: BufferView[] = [];
+    private samplers: Sampler[] = [];
     private scene: Scene;
 
     private bufferCache: {[key: string]: ArrayBuffer} = {};
 
     public async load(uri: string): Promise<void> {
+        this.clean();
         const asset: GltfAsset = await loader.load(uri);
         this.asset = asset;
 
-        const { nodes, scene: sceneIdx, scenes, meshes, materials, textures, accessors, bufferViews } = asset.gltf;
+        const { nodes, scene: sceneIdx, scenes, meshes,
+            materials, textures, accessors, bufferViews, samplers } = asset.gltf;
         if (scenes && nodes) {
             this.scene = scenes[sceneIdx || 0];
             this.nodes = nodes;
@@ -57,6 +62,9 @@ export class GltfService implements IGltfService {
         }
         if (bufferViews) {
             this.bufferViews = bufferViews;
+        }
+        if (samplers) {
+            this.samplers = samplers;
         }
     }
 
@@ -82,6 +90,10 @@ export class GltfService implements IGltfService {
 
     public getImage(idx: number): Promise<HTMLImageElement> {
         return this.asset.imageData.get(idx);
+    }
+
+    public getSampler(idx: number): Sampler {
+        return this.samplers[0];
     }
 
     private async getBinData(index: GlTfId): Promise<ArrayBuffer> {
@@ -114,16 +126,15 @@ export class GltfService implements IGltfService {
 
     public async getData(idx: number) {
         const accessor = this.accessors[idx];
-        const bufferView = this.bufferViews[this.accessors[idx].bufferView || 0];
+        const bufferView = this.bufferViews[accessor.bufferView || 0];
 
         const bufferData = await this.getBinData(bufferView.buffer);
 
-        var start = bufferView.byteOffset || 0;
-        var end = start + bufferView.byteLength;
-        var slicedBuffer = bufferData.slice(start, end);
+        const start = bufferView.byteOffset || 0;
+        const end = start + bufferView.byteLength;
+        const slicedBuffer = bufferData.slice(start, end);
 
         let bufferDataView;
-
         if (accessor.componentType === 5123) {
             bufferDataView = new Uint16Array(slicedBuffer);
         } else if (accessor.componentType === 5126) {
@@ -134,8 +145,17 @@ export class GltfService implements IGltfService {
 
         return {
             data: bufferDataView,
-            bufferView,
+            stride: bufferView.byteStride,
+            offset: accessor.byteOffset
         }
     }
     
+    private clean() {
+        this.bufferCache = {};
+        this.nodes = [];
+        this.materials = [];
+        this.meshes = [];
+        this.samplers = [];
+        this.textures = [];
+    }
 }

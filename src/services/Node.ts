@@ -6,7 +6,7 @@ import { ICameraService } from '@/services/Camera';
 import { IGltfService } from '@/services/GltfService';
 import { IRendererService } from '@/services/Renderer';
 import { mat4, quat, vec3 } from 'gl-matrix';
-import { GlTf, Node, Scene, Mesh, Material, MaterialPbrMetallicRoughness } from 'gltf-loader-ts/lib/gltf';
+import { GlTf, Node, Scene, Mesh, Material, MaterialPbrMetallicRoughness, MaterialNormalTextureInfo, TextureInfo, MaterialOcclusionTextureInfo } from 'gltf-loader-ts/lib/gltf';
 import { inject, injectable } from 'inversify';
 
 export interface ISceneNodeService {
@@ -41,48 +41,117 @@ export class SceneNode implements ISceneNodeService {
 
     public async setMesh(mesh: Mesh): Promise<void> {
         this.mesh = mesh;
+
+        /**
+         * if EXT_SRGB is not supported, we must converted to linear space in fragment shader manually.
+         * if supported, baseColorTexture, emissiveTexture & brdfLUT must use 'srgb' in regl.
+         */
+        if (!this._renderer.isSupportSRGB) {
+            this._renderer.addDefine('MANUAL_SRGB', 1);
+        }
+
         /**
          * load attributes & material
          */
         await Promise.all(this.mesh.primitives.map(async ({ attributes, indices, material: materialIdx }) => {
             await Promise.all(Object.keys(attributes).map(async attributeName => {
-                const { data, bufferView } = await this._gltf.getData(attributes[attributeName]);
+                const { data, offset, stride } = await this._gltf.getData(attributes[attributeName]);
                 switch (attributeName) {
                     case "POSITION": 
-                        this._renderer.addAttribute('a_Position', data, bufferView);
+                        this._renderer.addAttribute('a_Position', data, offset, stride);
                         break;
                     case "NORMAL":
                         this._renderer.addDefine('HAS_NORMALS', 1);
-                        this._renderer.addAttribute('a_Normal', data, bufferView);
+                        this._renderer.addAttribute('a_Normal', data, offset, stride);
                         break;
                     case "TANGENT":
                         this._renderer.addDefine('HAS_TANGENTS', 1);
-                        this._renderer.addAttribute('a_Tangent', data, bufferView);
+                        this._renderer.addAttribute('a_Tangent', data, offset, stride);
                         break;
                     case "TEXCOORD_0":
-                        this._renderer.addDefine('HAS_UV', 0);
-                        this._renderer.addAttribute('a_UV', data, bufferView);
+                        this._renderer.addDefine('HAS_UV', 1);
+                        this._renderer.addAttribute('a_UV', data, offset, stride);
                         break;
                 }
-                console.log("Accessor containing positions: ", attributeName, data);
             }));
 
             if (indices !== undefined) {
-                const { data, bufferView } = await this._gltf.getData(indices);
-                console.log("Accessor containing indices: ", 'indices', data);
-                this._renderer.setIndices(data, bufferView);
+                const { data } = await this._gltf.getData(indices);
+                this._renderer.setIndices(data);
             }
 
             if (materialIdx !== undefined) {
                 const material = this._gltf.getMaterial(materialIdx);
 
+                // https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#double-sided
                 this._renderer.setCullFace(!material.doubleSided);
                 
                 if (material.pbrMetallicRoughness) {
                     await this.setPBRMaterial(material.pbrMetallicRoughness);
                 }
+
+                if (material.normalTexture) {
+                    await this.setNormalTexture(material.normalTexture);
+                }
+
+                if (material.emissiveTexture) {
+                    await this.setEmissiveTexture(material.emissiveTexture, material.emissiveFactor);
+                }
+
+                if (material.occlusionTexture) {
+                    await this.setOcclusionTexture(material.occlusionTexture);
+                }
+            } else {
+                // add defaults for non-pbr material
+                this._renderer.addUniform('u_BaseColorFactor', [1, 1, 1, 1]);
+                this._renderer.addUniform('u_MetallicRoughnessValues', [0, 0]);
             }
         }));
+    }
+
+    /**
+     * @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#normaltextureinfo
+     */
+    private async setNormalTexture(normalTexture: MaterialNormalTextureInfo) {
+        const { index, scale } = normalTexture;
+        if (index !== undefined) {
+            const image = await this._gltf.getImage(index);
+            const sampler = this._gltf.getSampler(index);
+            this._renderer.addUniform('u_NormalSampler', { image, sampler }, 'texture');
+            this._renderer.addUniform('u_NormalScale', scale || 1);
+            this._renderer.addDefine('HAS_NORMALMAP', 1);
+        }
+    }
+
+    /**
+     * @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#materialemissivetexture
+     */
+    private async setEmissiveTexture(emissiveTexture: TextureInfo, emissiveFactor: number[]|undefined) {
+        const { index } = emissiveTexture;
+        if (index !== undefined) {
+            const image = await this._gltf.getImage(index);
+            const sampler = this._gltf.getSampler(index);
+            this._renderer.addUniform('u_EmissiveSampler', {
+                image, sampler, format: this._renderer.isSupportSRGB ? 'srgb' : 'rgba'
+            }, 'texture');
+            this._renderer.addUniform('u_EmissiveFactor', emissiveFactor || [0.0, 0.0, 0.0]);
+
+            this._renderer.addDefine('HAS_EMISSIVEMAP', 1);
+        }
+    }
+
+     /**
+     * @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#occlusiontextureinfo
+     */
+    private async setOcclusionTexture(occlusionTexture: MaterialOcclusionTextureInfo) {
+        const { index, strength } = occlusionTexture;
+        if (index !== undefined) {
+            const image = await this._gltf.getImage(index);
+            const sampler = this._gltf.getSampler(index);
+            this._renderer.addUniform('u_OcclusionSampler', { image, sampler }, 'texture');
+            this._renderer.addUniform('u_OcclusionStrength', strength || 1);
+            this._renderer.addDefine('HAS_OCCLUSIONMAP', 1);
+        }
     }
 
     private async setPBRMaterial(pbrMetallicRoughness: MaterialPbrMetallicRoughness) {
@@ -94,26 +163,32 @@ export class SceneNode implements ISceneNodeService {
             let bct = this._gltf.getTexture(baseColorTexture.index);
             if (bct.source !== undefined) {
                 const image = await this._gltf.getImage(bct.source);
+                const sampler = this._gltf.getSampler(bct.source);
                 this._renderer.addDefine('HAS_BASECOLORMAP', 1);
-                this._renderer.addUniform('u_BaseColorSampler', image, 'texture');
+                this._renderer.addUniform('u_BaseColorSampler', {
+                    image, sampler,
+                    format: this._renderer.isSupportSRGB ? 'srgb' : 'rgba'
+                }, 'texture');
             }
         }
+
         this._renderer.addUniform('u_BaseColorFactor', baseColorFactor
             || [1, 1, 1, 1]);
 
-        // Metallic-Roughness
+        /**
+         * @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#metallic-roughness-material
+         */
         this._renderer.addUniform('u_MetallicRoughnessValues',
-            [metallicFactor || 1, roughnessFactor || 1]);
+            [metallicFactor || 0, roughnessFactor || 0]);
         if (metallicRoughnessTexture) {
             let mrt = this._gltf.getTexture(metallicRoughnessTexture.index);
             if (mrt.source !== undefined) {
                 const image = await this._gltf.getImage(mrt.source);
+                const sampler = this._gltf.getSampler(mrt.source);
                 this._renderer.addDefine('HAS_METALROUGHNESSMAP', 1);
-                this._renderer.addUniform('u_MetallicRoughnessSampler', image, 'texture');
+                this._renderer.addUniform('u_MetallicRoughnessSampler', { image, sampler }, 'texture');
             }
         }
-
-        // TODO: Normals, brdfLUT, Emissive & AO
     }
 
     public addChild(node: SceneNode): void {
@@ -132,11 +207,13 @@ export class SceneNode implements ISceneNodeService {
 
         const mvpMatrix = mat4.create();
         mat4.mul(mvpMatrix, this._camera.transform, modelMatrix);
-        // mat4.mul(mvpMatrix, mvpMatrix, modelMatrix);
 
+        const cameraPosition = vec3.create();
+        vec3.mul(cameraPosition, this._camera.eye, vec3.set(cameraPosition, 1, 1, -1));
         if (this.mesh) {
             this._renderer.callDrawCommand({
-                cameraPosition: this._camera.eye,
+                // @ts-ignore
+                cameraPosition,
                 modelMatrix,
                 normalMatrix,
                 mvpMatrix

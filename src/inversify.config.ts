@@ -10,7 +10,7 @@ import { ISceneService, SceneService } from '@/services/SceneService';
 import { IMouseService, Mouse } from '@/services/Mouse';
 import { ISceneNodeService, SceneNode } from '@/services/Node';
 import { EventEmitter } from 'eventemitter3';
-import { Container, decorate, injectable, interfaces } from 'inversify';
+import { Container, decorate, injectable } from 'inversify';
 
 const container: Container = new Container();
 container.bind<IGltfService>(SERVICE_IDENTIFIER.GltfService)
