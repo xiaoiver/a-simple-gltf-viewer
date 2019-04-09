@@ -1,0 +1,44 @@
+{
+	"name": "a-simple-gltf-viewer",
+	"version": "2.0.1",
+	"description": "Pre-configured boilerplate for Electron + React + TypeScript",
+	"main": "./main.bundle.js",
+	"author": "Wing Chau @Devtography",
+	"license": "MIT",
+	"dependencies": {
+		"@types/hammerjs": "^2.0.36",
+		"@types/react": "^16.7.18",
+		"@types/react-dom": "^16.0.11",
+		"@types/stats.js": "^0.17.0",
+		"dat.gui": "^0.7.6",
+		"eventemitter3": "^3.1.0",
+		"gl-matrix": "^3.0.0",
+		"gltf-loader-ts": "^0.3.1",
+		"hammerjs": "^2.0.8",
+		"inversify": "^5.0.1",
+		"react": "^16.7.0",
+		"react-dom": "^16.7.0",
+		"react-loading": "^2.0.3",
+		"reflect-metadata": "^0.1.13",
+		"regl": "^1.3.11",
+		"stats.js": "^0.17.0"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/xiaoiver/a-simple-gltf-viewer"
+	},
+	"keywords": [
+		"Electron",
+		"React",
+		"Typescript",
+		"Webpack"
+	],
+	"bugs": {
+		"url": "https://github.com/xiaoiver/a-simple-gltf-viewer/issues"
+	},
+	"homepage": "https://github.com/xiaoiver/a-simple-gltf-viewer#readme",
+	"scripts": {
+		"start": "electron ./main.bundle.js"
+	},
+	"postinstall": "electron-builder install-app-deps"
+}

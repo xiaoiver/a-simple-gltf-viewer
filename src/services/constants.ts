@@ -9,12 +9,11 @@ const SERVICE_IDENTIFIER = {
     MouseService: Symbol.for("MouseService"),
 };
 
-/**
- * map glsl
- * @see https://github.com/regl-project/regl/blob/gh-pages/API.md#textures
- * @see https://gist.github.com/szimek/763999
- */
+const BRDFLUT_PATH = 'textures/brdfLUT.png';
 
+/**
+ * @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#samplerminfilter
+ */
 const MIN_FILTER: {
     [key: number]: TextureMinFilterType
 } = {
@@ -25,12 +24,20 @@ const MIN_FILTER: {
     9986: 'nearest mipmap linear',
     9987: 'linear mipmap linear'
 };
+
+/**
+ * @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#samplermagfilter
+ */
 const MAG_FILTER: {
     [key: number]: TextureMagFilterType
 } = {
     9728: 'nearest',
     9729: 'linear'
 };
+
+/**
+ * @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#samplerwraps
+ */
 const WRAP_S: {
     [key: number]: TextureWrapModeType
 } = {
@@ -40,4 +47,4 @@ const WRAP_S: {
 };
 const WRAP_T = WRAP_S;
 
-export { SERVICE_IDENTIFIER, MIN_FILTER, MAG_FILTER, WRAP_S, WRAP_T };
+export { SERVICE_IDENTIFIER, BRDFLUT_PATH, MIN_FILTER, MAG_FILTER, WRAP_S, WRAP_T };

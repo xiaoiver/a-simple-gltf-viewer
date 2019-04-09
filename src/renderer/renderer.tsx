@@ -28,15 +28,15 @@ class App extends React.Component<{}, {
     const gui = new dat.GUI();
     const folder = gui.addFolder('glTF viewer');
 
-    const models = ['Triangle', 'Box', 'BoxTextured', 'DamagedHelmet'
-      //'MetalRoughSpheres'
+    const models = ['Triangle', 'Box', 'BoxTextured', 'DamagedHelmet', 'Corset', 
+      'MetalRoughSpheres'
     ];
 
-    const text = { Model: 'BoxTextured' };
+    const text = { Model: 'DamagedHelmet' };
     folder.add(text, 'Model', models).onChange(this.loadModel);
     folder.open();
 
-    this.loadModel('BoxTextured');
+    this.loadModel('DamagedHelmet');
   }
 
   loadModel = async (modelName: string) => {
@@ -49,7 +49,14 @@ class App extends React.Component<{}, {
   render() {
     const { loading } = this.state;
     return <>
-      {loading && <ReactLoading type="balls" color="blue" height={'64px'} width={'64px'} />}
+      {loading && <div style={{
+        position: 'fixed',
+        left: '50%',
+        top: '50%',
+        transform: 'translate(-32px, -32px)',
+        zIndex: 1
+      }}>
+        <ReactLoading type="balls" color="blue" height={'64px'} width={'64px'}/></div>}
       <div id="viewer-container"></div>
     </>
   }

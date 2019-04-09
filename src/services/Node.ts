@@ -1,12 +1,13 @@
 /**
  * Scene
  */
-import { SERVICE_IDENTIFIER } from '@/services/constants';
+import * as regl from 'regl';
+import { SERVICE_IDENTIFIER, WRAP_T, WRAP_S, MAG_FILTER, MIN_FILTER } from '@/services/constants';
 import { ICameraService } from '@/services/Camera';
 import { IGltfService } from '@/services/GltfService';
 import { IRendererService } from '@/services/Renderer';
-import { mat4, quat, vec3 } from 'gl-matrix';
-import { GlTf, Node, Scene, Mesh, Material, MaterialPbrMetallicRoughness, MaterialNormalTextureInfo, TextureInfo, MaterialOcclusionTextureInfo } from 'gltf-loader-ts/lib/gltf';
+import { mat4 } from 'gl-matrix';
+import { Mesh, MaterialPbrMetallicRoughness, MaterialNormalTextureInfo, TextureInfo, MaterialOcclusionTextureInfo, Sampler } from 'gltf-loader-ts/lib/gltf';
 import { inject, injectable } from 'inversify';
 
 export interface ISceneNodeService {
@@ -14,8 +15,21 @@ export interface ISceneNodeService {
     setMatrix(matrix: mat4): void;
     setMesh(mesh: Mesh): Promise<void>;
     addChild(node: ISceneNodeService): void;
+    buildDrawCommand(): void;
     draw(parentTransform: mat4): void;
+    clean(): void;
 }
+
+const defaultDefines = {
+    HAS_NORMALS: 0,
+    HAS_TANGENTS: 0,
+    HAS_UV: 0,
+    HAS_BASECOLORMAP: 0,
+    HAS_METALROUGHNESSMAP: 0,
+    HAS_NORMALMAP: 0,
+    HAS_EMISSIVEMAP: 0,
+    HAS_OCCLUSIONMAP: 0
+};
 
 /**
  * SceneNode
@@ -26,6 +40,16 @@ export class SceneNode implements ISceneNodeService {
     private matrix: mat4;
     private mesh: Mesh;
     private children: ISceneNodeService[] = [];
+    private drawCommand: regl.DrawCommand;
+
+    private attributes: {[key: string]: any} = {};
+    private uniforms: {[key: string]: any} = {};
+    private defines: {[key: string]: number} = {...defaultDefines};
+    private indices: {
+        data: Uint8Array | Uint16Array | Float32Array | undefined;
+    };
+    private textures: regl.Texture2D[] = [];
+    private cullFace: boolean = true;
 
     @inject(SERVICE_IDENTIFIER.GltfService) private _gltf: IGltfService;
     @inject(SERVICE_IDENTIFIER.RendererService) private _renderer: IRendererService;
@@ -43,14 +67,6 @@ export class SceneNode implements ISceneNodeService {
         this.mesh = mesh;
 
         /**
-         * if EXT_SRGB is not supported, we must converted to linear space in fragment shader manually.
-         * if supported, baseColorTexture, emissiveTexture & brdfLUT must use 'srgb' in regl.
-         */
-        if (!this._renderer.isSupportSRGB) {
-            this._renderer.addDefine('MANUAL_SRGB', 1);
-        }
-
-        /**
          * load attributes & material
          */
         await Promise.all(this.mesh.primitives.map(async ({ attributes, indices, material: materialIdx }) => {
@@ -58,33 +74,33 @@ export class SceneNode implements ISceneNodeService {
                 const { data, offset, stride } = await this._gltf.getData(attributes[attributeName]);
                 switch (attributeName) {
                     case "POSITION": 
-                        this._renderer.addAttribute('a_Position', data, offset, stride);
+                        this.addAttribute('a_Position', data, offset, stride);
                         break;
                     case "NORMAL":
-                        this._renderer.addDefine('HAS_NORMALS', 1);
-                        this._renderer.addAttribute('a_Normal', data, offset, stride);
+                        this.addDefine('HAS_NORMALS', 1);
+                        this.addAttribute('a_Normal', data, offset, stride);
                         break;
                     case "TANGENT":
-                        this._renderer.addDefine('HAS_TANGENTS', 1);
-                        this._renderer.addAttribute('a_Tangent', data, offset, stride);
+                        this.addDefine('HAS_TANGENTS', 1);
+                        this.addAttribute('a_Tangent', data, offset, stride);
                         break;
                     case "TEXCOORD_0":
-                        this._renderer.addDefine('HAS_UV', 1);
-                        this._renderer.addAttribute('a_UV', data, offset, stride);
+                        this.addDefine('HAS_UV', 1);
+                        this.addAttribute('a_UV', data, offset, stride);
                         break;
                 }
             }));
 
             if (indices !== undefined) {
                 const { data } = await this._gltf.getData(indices);
-                this._renderer.setIndices(data);
+                this.setIndices(data);
             }
 
             if (materialIdx !== undefined) {
                 const material = this._gltf.getMaterial(materialIdx);
 
                 // https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#double-sided
-                this._renderer.setCullFace(!material.doubleSided);
+                this.cullFace = !material.doubleSided;
                 
                 if (material.pbrMetallicRoughness) {
                     await this.setPBRMaterial(material.pbrMetallicRoughness);
@@ -103,8 +119,8 @@ export class SceneNode implements ISceneNodeService {
                 }
             } else {
                 // add defaults for non-pbr material
-                this._renderer.addUniform('u_BaseColorFactor', [1, 1, 1, 1]);
-                this._renderer.addUniform('u_MetallicRoughnessValues', [0, 0]);
+                this.addUniform('u_BaseColorFactor', [1, 1, 1, 1]);
+                this.addUniform('u_MetallicRoughnessValues', [0, 0]);
             }
         }));
     }
@@ -117,9 +133,9 @@ export class SceneNode implements ISceneNodeService {
         if (index !== undefined) {
             const image = await this._gltf.getImage(index);
             const sampler = this._gltf.getSampler(index);
-            this._renderer.addUniform('u_NormalSampler', { image, sampler }, 'texture');
-            this._renderer.addUniform('u_NormalScale', scale || 1);
-            this._renderer.addDefine('HAS_NORMALMAP', 1);
+            this.addUniform('u_NormalSampler', { image, sampler }, 'texture');
+            this.addUniform('u_NormalScale', scale || 1);
+            this.addDefine('HAS_NORMALMAP', 1);
         }
     }
 
@@ -131,12 +147,11 @@ export class SceneNode implements ISceneNodeService {
         if (index !== undefined) {
             const image = await this._gltf.getImage(index);
             const sampler = this._gltf.getSampler(index);
-            this._renderer.addUniform('u_EmissiveSampler', {
-                image, sampler, format: this._renderer.isSupportSRGB ? 'srgb' : 'rgba'
+            this.addUniform('u_EmissiveSampler', {
+                image, sampler, format: this._renderer.isSupportSRGB() ? 'srgb' : 'rgba'
             }, 'texture');
-            this._renderer.addUniform('u_EmissiveFactor', emissiveFactor || [0.0, 0.0, 0.0]);
-
-            this._renderer.addDefine('HAS_EMISSIVEMAP', 1);
+            this.addUniform('u_EmissiveFactor', emissiveFactor || [0.0, 0.0, 0.0]);
+            this.addDefine('HAS_EMISSIVEMAP', 1);
         }
     }
 
@@ -148,9 +163,9 @@ export class SceneNode implements ISceneNodeService {
         if (index !== undefined) {
             const image = await this._gltf.getImage(index);
             const sampler = this._gltf.getSampler(index);
-            this._renderer.addUniform('u_OcclusionSampler', { image, sampler }, 'texture');
-            this._renderer.addUniform('u_OcclusionStrength', strength || 1);
-            this._renderer.addDefine('HAS_OCCLUSIONMAP', 1);
+            this.addUniform('u_OcclusionSampler', { image, sampler }, 'texture');
+            this.addUniform('u_OcclusionStrength', strength || 1);
+            this.addDefine('HAS_OCCLUSIONMAP', 1);
         }
     }
 
@@ -164,35 +179,121 @@ export class SceneNode implements ISceneNodeService {
             if (bct.source !== undefined) {
                 const image = await this._gltf.getImage(bct.source);
                 const sampler = this._gltf.getSampler(bct.source);
-                this._renderer.addDefine('HAS_BASECOLORMAP', 1);
-                this._renderer.addUniform('u_BaseColorSampler', {
+                this.addDefine('HAS_BASECOLORMAP', 1);
+                this.addUniform('u_BaseColorSampler', {
                     image, sampler,
-                    format: this._renderer.isSupportSRGB ? 'srgb' : 'rgba'
+                    format: this._renderer.isSupportSRGB() ? 'srgb' : 'rgba'
                 }, 'texture');
             }
         }
 
-        this._renderer.addUniform('u_BaseColorFactor', baseColorFactor
+        this.addUniform('u_BaseColorFactor', baseColorFactor
             || [1, 1, 1, 1]);
 
         /**
          * @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#metallic-roughness-material
          */
-        this._renderer.addUniform('u_MetallicRoughnessValues',
-            [metallicFactor || 0, roughnessFactor || 0]);
+        this.addUniform('u_MetallicRoughnessValues',
+            [metallicFactor || 1, roughnessFactor || 1]);
         if (metallicRoughnessTexture) {
             let mrt = this._gltf.getTexture(metallicRoughnessTexture.index);
             if (mrt.source !== undefined) {
                 const image = await this._gltf.getImage(mrt.source);
                 const sampler = this._gltf.getSampler(mrt.source);
-                this._renderer.addDefine('HAS_METALROUGHNESSMAP', 1);
-                this._renderer.addUniform('u_MetallicRoughnessSampler', { image, sampler }, 'texture');
+                this.addDefine('HAS_METALROUGHNESSMAP', 1);
+                this.addUniform('u_MetallicRoughnessSampler', { image, sampler }, 'texture');
             }
         }
     }
 
     public addChild(node: SceneNode): void {
         this.children.push(node);
+    }
+
+    private addAttribute(attributeName: string, data: any, offset: number|undefined, stride: number|undefined) {
+        const regl = this._renderer.getRegl();
+        this.attributes[attributeName] = {
+            buffer: regl.buffer(data)
+        };
+        if (offset !== undefined) {
+            this.attributes[attributeName].offset = offset;
+        }
+        if (stride !== undefined) {
+            this.attributes[attributeName].stride = stride;
+        }
+    }
+
+    private addUniform(uniformName: string,
+        value: { image: HTMLImageElement, sampler: Sampler, format: regl.TextureFormatType }|any,
+        type?: string) {
+        const regl = this._renderer.getRegl();
+        if (type === 'texture') {
+            const { image, sampler, format = 'rgba' } = value;
+            /**
+             * Any colorspace information (such as ICC profiles, intents, etc) from PNG or JPEG containers must be ignored.
+             * In regl, colorSpace is default to 'none' so that we don't need to set it manually.
+             * @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#images
+             */
+            const textureParams: Partial<regl.Texture2DOptions> = {
+                data: image,
+                min: 'linear',
+                mag: 'linear',
+                // https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#samplerwraps
+                wrapS: 'repeat',
+                wrapT: 'repeat',
+                format
+            };
+
+            if (sampler) {
+                if (sampler.minFilter !== undefined) {
+                    textureParams.min = MIN_FILTER[sampler.minFilter];
+                }
+                if (sampler.magFilter !== undefined) {
+                    textureParams.mag = MAG_FILTER[sampler.magFilter];
+                }
+                if (sampler.wrapS !== undefined) {
+                    textureParams.wrapS = WRAP_S[sampler.wrapS];
+                }
+                if (sampler.wrapT !== undefined) {
+                    textureParams.wrapT = WRAP_T[sampler.wrapT];
+                }
+            }
+            this.uniforms[uniformName] = regl.texture(textureParams);
+            this.textures.push(this.uniforms[uniformName]);
+        } else {
+            this.uniforms[uniformName] = value;
+        }
+    }
+
+    public addDefine(defineName: string, value: number) {
+        this.defines[defineName] = value;
+    }
+
+    public setIndices(indices: Uint8Array | Uint16Array | Float32Array | undefined) {
+        this.indices = {
+            data: indices
+        };
+    }
+
+    public buildDrawCommand(): void {
+        this.drawCommand = this._renderer.createDrawCommand({
+            attributes: this.attributes,
+            uniforms: this.uniforms,
+            defines: this.defines,
+            indices: this.indices,
+            cullFace: this.cullFace
+        });
+    }
+
+    public clean(): void {
+        this.attributes = {};
+        this.defines = {...defaultDefines};
+        // destroy current model's textures
+        this.textures.forEach(t => {
+            t.destroy();
+        });
+        this.textures = [];
+        this.uniforms = {};
     }
 
     public async draw(parentTransform: mat4): Promise<void> {
@@ -208,12 +309,10 @@ export class SceneNode implements ISceneNodeService {
         const mvpMatrix = mat4.create();
         mat4.mul(mvpMatrix, this._camera.transform, modelMatrix);
 
-        const cameraPosition = vec3.create();
-        vec3.mul(cameraPosition, this._camera.eye, vec3.set(cameraPosition, 1, 1, -1));
         if (this.mesh) {
-            this._renderer.callDrawCommand({
+            this.drawCommand({
                 // @ts-ignore
-                cameraPosition,
+                cameraPosition: this._camera.eye,
                 modelMatrix,
                 normalMatrix,
                 mvpMatrix

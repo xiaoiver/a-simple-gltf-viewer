@@ -15,7 +15,7 @@ const isEnvDevelopment = process.env.NODE_ENV === 'development';
 const commonConfig = {
   devtool: isEnvDevelopment ? 'source-map' : false,
   mode: isEnvProduction ? 'production' : 'development',
-  output: { path: srcPaths('dist') },
+  output: { path: srcPaths('docs') },
   node: { __dirname: false, __filename: false },
   resolve: {
     alias: {
@@ -79,7 +79,7 @@ rendererConfig.plugins = [
     template: path.resolve(__dirname, './public/index.html'),
   }),
   new CopyPlugin([
-    { from: srcPaths('public/textures'), to: srcPaths('dist') },
+    { from: srcPaths('public/textures'), to: srcPaths('docs/textures') },
   ])
 ];
 

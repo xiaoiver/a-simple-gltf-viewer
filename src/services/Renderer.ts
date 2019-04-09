@@ -6,42 +6,31 @@ import * as regl from 'regl';
 import * as Stats from 'stats.js';
 import { inject, injectable } from 'inversify';
 import { EventEmitter } from 'eventemitter3';
-import { SERVICE_IDENTIFIER, MIN_FILTER, MAG_FILTER, WRAP_S, WRAP_T } from '@/services/constants';
+import { SERVICE_IDENTIFIER, BRDFLUT_PATH } from '@/services/constants';
 import { ISceneService } from '@/services/SceneService';
 // @ts-ignore
 import vert from '@/shaders/vert.glsl';
 // @ts-ignore
 import frag from '@/shaders/frag.glsl';
-import { Sampler } from 'gltf-loader-ts/lib/gltf';
 import { loadImage } from '@/utils/asset';
-import { IGltfService } from './GltfService';
+
+interface drawParams {
+    attributes: {[key: string]: any};
+    uniforms: {[key: string]: any};
+    indices: any;
+    defines: {[key: string]: number};
+    cullFace: boolean;
+}
 
 export interface IRendererService {
     on(name: string, cb: Function): void;
     init(container: string): void;
     render(): void;
     getCanvas(): HTMLCanvasElement;
-    addAttribute(attributeName: string, data: any, offset: number|undefined, stride: number|undefined): void;
-    addDefine(defineName: string, value: number): void;
-    addUniform(uniformName: string, value: any, type?: string): void;
-    setIndices(indices: Uint8Array | Uint16Array | Float32Array | undefined): void;
-    setCullFace(enabled: boolean): void;
-    callDrawCommand(body?: regl.CommandBodyFn<regl.DefaultContext, {}> | undefined): void;
+    getRegl(): regl.Regl;
+    createDrawCommand(params: drawParams): regl.DrawCommand;
     isSupportSRGB(): boolean;
 }
-
-const defaultDefines = {
-    USE_IBL: 0,
-    HAS_NORMALS: 0,
-    HAS_TANGENTS: 0,
-    HAS_UV: 0,
-    HAS_BASECOLORMAP: 0,
-    HAS_METALROUGHNESSMAP: 0,
-    HAS_NORMALMAP: 0,
-    MANUAL_SRGB: 0,
-    HAS_EMISSIVEMAP: 0,
-    HAS_OCCLUSIONMAP: 0
-};
 
 @injectable()
 export class Renderer extends EventEmitter implements IRendererService {
@@ -51,20 +40,30 @@ export class Renderer extends EventEmitter implements IRendererService {
 
     private _regl: regl.Regl;
     private stats: Stats;
-    private draw: regl.DrawCommand;
     private canvas: HTMLCanvasElement;
-    private indices: {
-        data: Uint8Array;
+
+    private defines: {[key: string]: number} = {
+        USE_IBL: 1,
+        MANUAL_SRGB: 0,
+        USE_TEX_LOD: 0
     };
-    private attributes: {[key: string]: any} = {};
-    private uniforms: {[key: string]: any} = {};
-    private defines: {[key: string]: number} = {...defaultDefines};
-    private cullFace: boolean = true;
+
+    /**
+     * Uniforms relative to current environment. They will not be destroyed when model changed,
+     * such as brdfLUT, diffuseEnv and specularEnv.
+     */
+    private sceneUniforms: {[key: string]: any} = {};
+
+    /**
+     * WebGL extension flags
+     */
     private supportSRGB: boolean = false;
+    private supportTextureLod: boolean = false;
+    private supportDerivatives: boolean = false;
+
     private inited: boolean = false;
 
     @inject(SERVICE_IDENTIFIER.SceneService) private _scene: ISceneService;
-    @inject(SERVICE_IDENTIFIER.GltfService) private _gltf: IGltfService;
 
     private initStats() {
         this.stats = new Stats();
@@ -76,22 +75,23 @@ export class Renderer extends EventEmitter implements IRendererService {
         document.body.appendChild($stats);
     }
 
-    private prefixDefines(glsl: string): string {
+    private prefixDefines(glsl: string, defines: any): string {
+        const d = { ...this.defines, ...defines };
         return `
-        ${Object.keys(this.defines).reduce((prev, defineName) => {
-            return prev + (this.defines[defineName] ?
-                `#define ${defineName} ${this.defines[defineName]} \n` : '');
+        ${Object.keys(d).reduce((prev, defineName) => {
+            return prev + (d[defineName] ?
+                `#define ${defineName} ${d[defineName]} \n` : '');
         }, '')}
         ${glsl}`;
     }
 
-    private createDrawCommand() {
-        this.draw = this._regl({
-            vert: this.prefixDefines(vert),
-            frag: this.prefixDefines(frag),
-            attributes: this.attributes,
+    public createDrawCommand({ attributes, uniforms, defines, indices, cullFace }: drawParams) {
+        return this._regl({
+            vert: this.prefixDefines(vert, defines),
+            frag: this.prefixDefines(frag, defines),
+            attributes,
             uniforms: {
-                u_LightDirection: [0, 4, 4],
+                u_LightDirection: [0, 0.5, 0.5],
                 u_LightColor: [1, 1, 1],
                 // @ts-ignore
                 u_Camera: this._regl.prop('cameraPosition'),
@@ -104,22 +104,22 @@ export class Renderer extends EventEmitter implements IRendererService {
                 u_ScaleDiffBaseMR: [0, 0, 0, 0],
                 u_ScaleFGDSpec: [0, 0, 0, 0],
                 u_ScaleIBLAmbient: [1, 1, 0, 0],
-                ...this.uniforms
+                ...uniforms,
+                ...this.sceneUniforms
             },
             cull: {
                 // @ts-ignore
-                enable: this._regl.this('cullFace'),
+                enable: cullFace,
                 face: 'back'
+            },
+            depth: {
+                enable: true
             },
             elements: this._regl.elements({
                 primitive: 'triangles',
-                data: this.indices.data
+                data: indices.data
             })
         });
-    }
-
-    public callDrawCommand(body?: regl.CommandBodyFn<regl.DefaultContext, {}> | undefined): void {
-        this.draw(body);
     }
 
     public async init(container: string): Promise<void> {
@@ -146,6 +146,19 @@ export class Renderer extends EventEmitter implements IRendererService {
 
                         if (_regl.hasExtension('EXT_SRGB')) {
                             this.supportSRGB = true;
+                        } else {
+                            /**
+                             * if EXT_SRGB is not supported, we must converted to linear space in fragment shader manually.
+                             * if supported, baseColorTexture, emissiveTexture & brdfLUT must use 'srgb' in regl.
+                             */
+                            this.defines['MANUAL_SRGB'] = 1;
+                        }
+                        if (_regl.hasExtension('EXT_shader_texture_lod')) {
+                            this.supportTextureLod = true;
+                            this.defines['USE_TEX_LOD'] = 1;
+                        }
+                        if (_regl.hasExtension('OES_standard_derivatives')) {
+                            this.supportDerivatives = true;
                         }
 
                         resolve(_regl);
@@ -166,102 +179,87 @@ export class Renderer extends EventEmitter implements IRendererService {
         }
     }
 
-    public setCullFace(enabled: boolean) {
-        this.cullFace = enabled;
-    }
-
-    public setIndices(indices: Uint8Array) {
-        this.indices = {
-            data: indices
-        };
-    }
-
-    public addAttribute(attributeName: string, data: any, offset: number|undefined, stride: number|undefined) {
-        this.attributes[attributeName] = {
-            buffer: this._regl.buffer(data)
-        };
-        if (offset !== undefined) {
-            this.attributes[attributeName].offset = offset;
-        }
-        if (stride !== undefined) {
-            this.attributes[attributeName].stride = stride;
-        }
-    }
-
-    public addUniform(uniformName: string,
-        value: { image: HTMLImageElement, sampler: Sampler, format: regl.TextureFormatType },
-        type?: string) {
-        if (type === 'texture') {
-            const { image, sampler, format = 'rgba' } = value;
-            const textureParams: Partial<regl.Texture2DOptions> = {
-                data: image,
-                format
-            };
-
-            if (sampler) {
-                if (sampler.minFilter !== undefined) {
-                    textureParams.min = MIN_FILTER[sampler.minFilter];
-                }
-                if (sampler.magFilter !== undefined) {
-                    textureParams.mag = MAG_FILTER[sampler.magFilter];
-                }
-                if (sampler.wrapS !== undefined) {
-                    textureParams.wrapS = WRAP_S[sampler.wrapS];
-                }
-                if (sampler.wrapT !== undefined) {
-                    textureParams.wrapT = WRAP_T[sampler.wrapT];
-                }
-                this.uniforms[uniformName] = this._regl.texture(textureParams);
-            }
-        } else {
-            this.uniforms[uniformName] = value;
-        }
-    }
-
-    public addDefine(defineName: string, value: number) {
-        this.defines[defineName] = value;
-    }
-
     public getCanvas() {
         return this.canvas;
+    }
+
+    public getRegl() {
+        return this._regl;
     }
 
     public isSupportSRGB() {
         return this.supportSRGB;
     }
 
-    private async loadBrdfLUT() {
-        // brdfLUT
-        const image = await loadImage('textures/brdfLUT.png');
-        const sampler = this._gltf.getSampler(0);
-        this.addUniform('brdfLUT', {
-            image, sampler,
-            format: this.isSupportSRGB ? 'srgb' : 'rgba'
-        }, 'texture');
+    public isSupportTextureLod() {
+        return this.supportTextureLod;
     }
 
-    private clean() {
-        this.attributes = {};
-        this.uniforms = {};
-        this.defines = { ...defaultDefines };
+    public isSupportDerivatives() {
+        return this.supportDerivatives;
+    }
+
+    private async loadBrdfLUT() {
+        const image = await loadImage(BRDFLUT_PATH);
+        this.sceneUniforms['u_brdfLUT'] = this._regl.texture({
+            data: image,
+            min: 'linear',
+            mag: 'linear',
+            wrapS: 'clamp',
+            wrapT: 'clamp',
+            format: this.isSupportSRGB() ? 'srgb' : 'rgba'
+        });
+    }
+
+    private async loadEnvironment(envMap: string, type: string, uniformName: string, mipLevels: number) {
+        const path = `textures/${envMap}/${type}/${type}`;
+        const posXMipMaps = [];
+        const negXMipMaps = [];
+        const posYMipMaps = [];
+        const negYMipMaps = [];
+        const posZMipMaps = [];
+        const negZMipMaps = [];
+        for (let j = 0; j < mipLevels; j++) {
+            posXMipMaps.push(await loadImage(`${path}_right_${j}.jpg`));
+            negXMipMaps.push(await loadImage(`${path}_left_${j}.jpg`));
+            posYMipMaps.push(await loadImage(`${path}_top_${j}.jpg`));
+            negYMipMaps.push(await loadImage(`${path}_bottom_${j}.jpg`));
+            posZMipMaps.push(await loadImage(`${path}_front_${j}.jpg`));
+            negZMipMaps.push(await loadImage(`${path}_back_${j}.jpg`));
+        }
+
+        const cubeMap = this._regl.cube({
+            // @ts-ignore
+            faces: mipLevels === 1 ?
+                [posXMipMaps[0], negXMipMaps[0], posYMipMaps[0], negYMipMaps[0], posZMipMaps[0], negZMipMaps[0]]
+                : [ { mipmap: posXMipMaps },
+                    { mipmap: negXMipMaps },
+                    { mipmap: posYMipMaps },
+                    { mipmap: negYMipMaps },
+                    { mipmap: posZMipMaps },
+                    { mipmap: negZMipMaps } ],
+            wrapS: 'clamp',
+            wrapT: 'clamp',
+            min: mipLevels === 1 ? 'linear' : 'linear mipmap linear',
+            mag: 'linear',
+            format: this.isSupportSRGB() ? 'srgb' : 'rgba'
+        });
+
+        this.sceneUniforms[uniformName] = cubeMap;
     }
 
     public async render() {
-        this.clean();
+        if (!this.inited) {
+            // load resources relative to current environment only once
+            await this.loadBrdfLUT();
+            await this.loadEnvironment('papermill', 'diffuse', 'u_DiffuseEnvSampler', 1);
+            await this.loadEnvironment('papermill', 'specular', 'u_SpecularEnvSampler', 10);
+        }
 
+        // rebuild scene graph
         await this._scene.init();
 
-        this.createDrawCommand();
-
-        const canvas = this.getCanvas();
-        this.emit(Renderer.RESIZE_EVENT, [{
-            width: canvas.width,
-            height: canvas.height
-        }]);
-
         if (!this.inited) {
-            await this.loadBrdfLUT();
-
             this._regl.frame(() => {
                 this._regl.clear({
                     color: [0, 0, 0, 1],
@@ -274,5 +272,11 @@ export class Renderer extends EventEmitter implements IRendererService {
             });
             this.inited = true;
         }
+
+        const canvas = this.getCanvas();
+        this.emit(Renderer.RESIZE_EVENT, [{
+            width: canvas.width,
+            height: canvas.height
+        }]);
     }
 }

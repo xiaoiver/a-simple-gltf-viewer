@@ -19,13 +19,17 @@ export interface ISceneService {
  */
 @injectable()
 export class SceneService implements ISceneService {
-    private nodes: ISceneNodeService[];
+    private nodes: ISceneNodeService[] = [];
     @inject(SERVICE_IDENTIFIER.GltfService) private _gltf: IGltfService;
 
     /**
      * construct scene graph
      */
     public async init(): Promise<void> {
+        // clean every existed node first
+        this.nodes.forEach(node => node.clean());
+        this.nodes = [];
+
         const scene = this._gltf.getScene();
         if (scene.nodes) {
             this.nodes = await Promise.all(scene.nodes.map(i => {
@@ -39,11 +43,12 @@ export class SceneService implements ISceneService {
      * create scene node recursive
      */
     private async createSceneNode(node: Node, id: number): Promise<ISceneNodeService> {
-        // const sceneNode = new SceneNode();
         const sceneNode = container.get<ISceneNodeService>(SERVICE_IDENTIFIER.SceneNodeService);
         sceneNode.setId(id);
         if (node.mesh !== undefined) {
             await sceneNode.setMesh(this._gltf.getMesh(node.mesh));
+            // use regl to create a draw command
+            sceneNode.buildDrawCommand();
         }
 
         // init local matrix
