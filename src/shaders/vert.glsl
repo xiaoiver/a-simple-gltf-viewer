@@ -1,4 +1,5 @@
 attribute vec3 a_Position;
+attribute vec3 a_Barycentric;
 #ifdef HAS_NORMALS
 attribute vec3 a_Normal;
 #endif
@@ -15,6 +16,7 @@ uniform mat4 u_NormalMatrix;
 
 varying vec3 v_Position;
 varying vec2 v_UV;
+varying vec3 v_Barycentric;
 
 #ifdef HAS_NORMALS
 #ifdef HAS_TANGENTS
@@ -26,6 +28,8 @@ varying vec3 v_Normal;
 
 
 void main() {
+    v_Barycentric = a_Barycentric;
+
     vec4 pos = u_ModelMatrix * vec4(a_Position, 1.);
     v_Position = vec3(pos.xyz) / pos.w;
 

@@ -2,10 +2,16 @@
  * provide raw scene & nodes data in glTF
  */
 import { injectable } from 'inversify';
-import { GltfAsset, GltfLoader, resolveURL } from 'gltf-loader-ts';
+import { GltfAsset, GltfLoader, resolveURL, GLTF_COMPONENT_TYPE_ARRAYS } from 'gltf-loader-ts';
 import { Node, Scene, Mesh, Material, Texture, BufferView, Accessor, GlTfId, Sampler } from 'gltf-loader-ts/lib/gltf';
 
 const loader: GltfLoader = new GltfLoader();
+
+export interface IAttributeData {
+    buffer: Uint8Array|Uint16Array|Float32Array;
+    componentType: number;
+    attributeType: string;
+}
 
 export interface IGltfService {
     load(uri: string): void;
@@ -16,11 +22,7 @@ export interface IGltfService {
     getTexture(idx: number): Texture;
     getImage(idx: number): Promise<HTMLImageElement>;
     getSampler(idx: number): Sampler;
-    getData(idx: number): Promise<{
-        data: Uint8Array|Uint16Array|Float32Array|undefined;
-        offset: number | undefined;
-        stride: number | undefined;
-    }>;
+    getData(idx: number): Promise<IAttributeData>;
 }
 
 @injectable()
@@ -72,27 +74,28 @@ export class GltfService implements IGltfService {
         return this.scene;
     }
 
-    public getNode(idx: number): Node {
+    public getNode(idx: GlTfId): Node {
         return this.nodes[idx];
     }
 
-    public getMesh(idx: number): Mesh {
+    public getMesh(idx: GlTfId): Mesh {
         return this.meshes[idx];
     }
 
-    public getMaterial(idx: number): Material {
+    public getMaterial(idx: GlTfId): Material {
         return this.materials[idx];
     }
 
-    public getTexture(idx: number): Texture {
+    public getTexture(idx: GlTfId): Texture {
         return this.textures[idx];
     }
 
-    public getImage(idx: number): Promise<HTMLImageElement> {
+    public getImage(idx: GlTfId): Promise<HTMLImageElement> {
         return this.asset.imageData.get(idx);
     }
 
-    public getSampler(idx: number): Sampler {
+    public getSampler(idx: GlTfId): Sampler {
+        // TODO: fix sampler idx
         return this.samplers[0];
     }
 
@@ -132,21 +135,17 @@ export class GltfService implements IGltfService {
 
         const start = bufferView.byteOffset || 0;
         const end = start + bufferView.byteLength;
-        const slicedBuffer = bufferData.slice(start, end);
+        const slicedBuffer = bufferData
+            .slice(start, end) // first slice per bufferview
+            .slice((accessor.byteOffset || 0)); // then slice per attribute
 
-        let bufferDataView;
-        if (accessor.componentType === 5123) {
-            bufferDataView = new Uint16Array(slicedBuffer);
-        } else if (accessor.componentType === 5126) {
-            bufferDataView = new Float32Array(slicedBuffer);
-        } else {
-            bufferDataView = new Uint8Array(slicedBuffer);
-        }
+        const bufferConstructor = GLTF_COMPONENT_TYPE_ARRAYS[accessor.componentType];
+        const bufferDataView = new bufferConstructor(slicedBuffer);
 
         return {
-            data: bufferDataView,
-            stride: bufferView.byteStride,
-            offset: accessor.byteOffset
+            buffer: bufferDataView,
+            componentType: accessor.componentType,
+            attributeType: accessor.type
         }
     }
     

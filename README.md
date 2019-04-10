@@ -1,12 +1,17 @@
 # a-simple-gltf-viewer
 
-Just a simple glTF viewer inspired by [glTF-WebGL-PBR](https://github.com/KhronosGroup/glTF-WebGL-PBR/) & [MARMOSET VIEWER](https://marmoset.co/viewer/).
+Just a simple glTF viewer inspired by: 
+* [glTF-WebGL-PBR](https://github.com/KhronosGroup/glTF-WebGL-PBR/)
+* [clay-viewer](https://pissang.github.io/clay-viewer/editor/)
+* [MARMOSET VIEWER](https://marmoset.co/viewer/).
+
+[![](screenshots/damaged-helmet.png)](https://xiaoiver.github.io/a-simple-gltf-viewer/)
 
 Features:
-* PBR
+* PBR in glTF 2.0
 * Use [Regl](https://github.com/regl-project/regl/) to handle WebGL stuffs.
 * Use [InversifyJS](https://github.com/inversify/InversifyJS) as an IoC container.
-* Use [gltf-loader-ts](https://github.com/bwasty/gltf-loader-ts/) to load external assets.
+* Use [gltf-loader-ts](https://github.com/bwasty/gltf-loader-ts/) to load glTF models.
 * Also based on [electron-react-typescript-webpack-boilerplate](https://github.com/Devtography/electron-react-typescript-webpack-boilerplate).
 
 TODO:

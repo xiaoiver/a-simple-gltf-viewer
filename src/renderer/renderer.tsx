@@ -31,12 +31,21 @@ class App extends React.Component<{}, {
     const models = ['Triangle', 'Box', 'BoxTextured', 'DamagedHelmet', 'Corset', 
       'MetalRoughSpheres'
     ];
+    const layers = ['all', 'albedo', 'normal', 'metallic', 'roughness'];
 
-    const text = { Model: 'DamagedHelmet' };
+    const text = { Model: 'BoxTextured', Layer: 'all' };
     folder.add(text, 'Model', models).onChange(this.loadModel);
+    folder.add(text, 'Layer', layers).onChange(this.showLayer);
+
+    const wireframeFolder = folder.addFolder('wireframe');
+    const wireframe = { lineColor: [255, 255, 255], lineWidth: 1 };
+    wireframeFolder.addColor(wireframe, 'lineColor').onChange(this.changeWireframeLineColor);
+    wireframeFolder.add(wireframe, 'lineWidth', 1, 5).onChange(this.changeWireframeLineWidth);
+
     folder.open();
 
-    this.loadModel('DamagedHelmet');
+    this.showLayer('all');
+    this.loadModel('BoxTextured');
   }
 
   loadModel = async (modelName: string) => {
@@ -45,6 +54,18 @@ class App extends React.Component<{}, {
       `https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/${modelName}/glTF/${modelName}.gltf`);
     this.setState({ loading: false });
   };
+
+  showLayer = (layerName: string) => {
+    this.viewer.showLayer(layerName);
+  };
+
+  changeWireframeLineColor = (color: number[]) => {
+    this.viewer.setWireframeLineColor(color.map(c => c / 255));
+  }
+  
+  changeWireframeLineWidth = (width: number) => {
+    this.viewer.setWireframeLineWidth(width);
+  }
 
   render() {
     const { loading } = this.state;

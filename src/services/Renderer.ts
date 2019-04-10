@@ -6,18 +6,20 @@ import * as regl from 'regl';
 import * as Stats from 'stats.js';
 import { inject, injectable } from 'inversify';
 import { EventEmitter } from 'eventemitter3';
-import { SERVICE_IDENTIFIER, BRDFLUT_PATH } from '@/services/constants';
+import { SERVICE_IDENTIFIER, BRDFLUT_PATH, REGL_COMPONENT_TYPE_ARRAYS } from '@/services/constants';
 import { ISceneService } from '@/services/SceneService';
 // @ts-ignore
 import vert from '@/shaders/vert.glsl';
 // @ts-ignore
 import frag from '@/shaders/frag.glsl';
 import { loadImage } from '@/utils/asset';
+import { IAttributeData } from './GltfService';
+import { GLTF_COMPONENT_TYPE_ARRAYS, GLTF_ELEMENTS_PER_TYPE } from '_gltf-loader-ts@0.3.1@gltf-loader-ts';
 
 interface drawParams {
-    attributes: {[key: string]: any};
+    attributes: {[key: string]: IAttributeData};
     uniforms: {[key: string]: any};
-    indices: any;
+    indices: IAttributeData;
     defines: {[key: string]: number};
     cullFace: boolean;
 }
@@ -30,6 +32,10 @@ export interface IRendererService {
     getRegl(): regl.Regl;
     createDrawCommand(params: drawParams): regl.DrawCommand;
     isSupportSRGB(): boolean;
+
+    setSplitLayer(splitLayer: number[]): void;
+    setWireframeLineColor(color: number[]): void;
+    setWireframeLineWidth(width: number): void;
 }
 
 @injectable()
@@ -41,6 +47,13 @@ export class Renderer extends EventEmitter implements IRendererService {
     private _regl: regl.Regl;
     private stats: Stats;
     private canvas: HTMLCanvasElement;
+
+    /**
+     * style variables
+     */
+    private splitLayer: number[] = [0, 0, 0, 0];
+    private wireframeLineColor: number[] = [0, 0, 0];
+    private wireframeLineWidth: number = 1;
 
     private defines: {[key: string]: number} = {
         USE_IBL: 1,
@@ -85,11 +98,71 @@ export class Renderer extends EventEmitter implements IRendererService {
         ${glsl}`;
     }
 
+    /**
+     * generate barycentric coordinates
+     * @see https://xiaoiver.github.io/coding/2018/10/22/Wireframe-%E7%9A%84%E5%AE%9E%E7%8E%B0.html
+     */
+    private generateBarycentric(attributes: {
+        [key: string]: IAttributeData;
+    }, indices: IAttributeData) {
+        const uniqueAttributes: {
+            [key: string]: {
+                buffer: Uint8Array|Uint16Array|Float32Array;
+            };
+        } = {};
+        const indiceNum = indices.buffer.length;
+
+        // create empty typed array according to indices' num
+        Object.keys(attributes).forEach(attributeName => {
+            const { componentType, attributeType } = attributes[attributeName];
+            const size = GLTF_ELEMENTS_PER_TYPE[attributeType];
+            const bufferConstructor = GLTF_COMPONENT_TYPE_ARRAYS[componentType];
+            uniqueAttributes[attributeName] = {
+                buffer: new bufferConstructor(size * indiceNum)
+            };
+        });
+        
+        // reallocate attribute data
+        let cursor = 0;
+        for (var i = 0; i < indiceNum; i++) {
+            var ii = indices.buffer[i];
+
+            Object.keys(attributes).forEach(name => {
+                const { buffer, attributeType } = attributes[name];
+                const size = GLTF_ELEMENTS_PER_TYPE[attributeType || 'VEC3'];
+                for (var k = 0; k < size; k++) {
+                    uniqueAttributes[name].buffer[cursor * size + k] = buffer[ii * size + k];
+                }
+            });
+            indices.buffer[i] = cursor;
+            cursor++;
+        }
+
+        // create barycentric attributes
+        const barycentricBuffer = new Float32Array(indiceNum * 3);
+        for (let i = 0; i < indiceNum;) {
+            for (let j = 0; j < 3; j++) {
+                const ii = indices.buffer[i++];
+                barycentricBuffer[ii * 3 + j] = 1;
+            }
+        }
+        uniqueAttributes['a_Barycentric'] = {
+            buffer: barycentricBuffer
+        };
+
+        return {
+            uniqueAttributes,
+            uniqueIndices: <Uint8Array|Uint16Array|Uint32Array>indices.buffer
+        }
+    }
+
     public createDrawCommand({ attributes, uniforms, defines, indices, cullFace }: drawParams) {
+        const { uniqueAttributes, uniqueIndices } = this.generateBarycentric(attributes, indices);
+
         return this._regl({
             vert: this.prefixDefines(vert, defines),
             frag: this.prefixDefines(frag, defines),
-            attributes,
+            attributes: uniqueAttributes,
             uniforms: {
                 u_LightDirection: [0, 0.5, 0.5],
                 u_LightColor: [1, 1, 1],
@@ -101,9 +174,11 @@ export class Renderer extends EventEmitter implements IRendererService {
                 u_NormalMatrix: this._regl.prop('normalMatrix'),
                 // @ts-ignore
                 u_MVPMatrix: this._regl.prop('mvpMatrix'),
-                u_ScaleDiffBaseMR: [0, 0, 0, 0],
+                u_ScaleDiffBaseMR: () => this.splitLayer,
                 u_ScaleFGDSpec: [0, 0, 0, 0],
                 u_ScaleIBLAmbient: [1, 1, 0, 0],
+                u_WireframeLineColor: () => this.wireframeLineColor,
+                u_WireframeLineWidth: () => this.wireframeLineWidth,
                 ...uniforms,
                 ...this.sceneUniforms
             },
@@ -117,7 +192,7 @@ export class Renderer extends EventEmitter implements IRendererService {
             },
             elements: this._regl.elements({
                 primitive: 'triangles',
-                data: indices.data
+                data: uniqueIndices
             })
         });
     }
@@ -248,6 +323,18 @@ export class Renderer extends EventEmitter implements IRendererService {
         this.sceneUniforms[uniformName] = cubeMap;
     }
 
+    setSplitLayer(splitLayer: number[]) {
+        this.splitLayer = splitLayer;
+    }
+
+    setWireframeLineColor(color: number[]) {
+        this.wireframeLineColor = color;
+    }
+
+    setWireframeLineWidth(width: number) {
+        this.wireframeLineWidth = width;
+    }
+
     public async render() {
         if (!this.inited) {
             // load resources relative to current environment only once
@@ -262,8 +349,8 @@ export class Renderer extends EventEmitter implements IRendererService {
         if (!this.inited) {
             this._regl.frame(() => {
                 this._regl.clear({
-                    color: [0, 0, 0, 1],
-                    stencil: 0
+                    color: [0.2, 0.2, 0.2, 1],
+                    depth: 1
                 });
 
                 this.stats.update();

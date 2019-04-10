@@ -51,4 +51,32 @@ export class GltfViewer {
         await gltfService.load(uri);
         await renderer.render();
     }
+
+    showLayer(layerName: string) {
+        switch (layerName) {
+            case 'all':
+                renderer.setSplitLayer([0, 0, 0, 0]);
+                break;
+            case 'normal':
+                renderer.setSplitLayer([1, 0, 0, 0]);
+                break;
+            case 'albedo':
+                renderer.setSplitLayer([0, 1, 0, 0]);
+                break;
+            case 'metallic':
+                renderer.setSplitLayer([0, 0, 1, 0]);
+                break;
+            case 'roughness':
+                renderer.setSplitLayer([0, 0, 0, 1]);
+                break;
+        }
+    }
+
+    setWireframeLineColor(color: number[]) {
+        renderer.setWireframeLineColor(color);
+    }
+
+    setWireframeLineWidth(width: number) {
+        renderer.setWireframeLineWidth(width);
+    }
 }

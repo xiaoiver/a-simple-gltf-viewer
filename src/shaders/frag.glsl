@@ -53,9 +53,11 @@ uniform vec3 u_Camera;
 uniform vec4 u_ScaleDiffBaseMR;
 uniform vec4 u_ScaleFGDSpec;
 uniform vec4 u_ScaleIBLAmbient;
+uniform vec3 u_WireframeLineColor;
+uniform float u_WireframeLineWidth;
 
 varying vec3 v_Position;
-
+varying vec3 v_Barycentric;
 varying vec2 v_UV;
 
 #ifdef HAS_NORMALS
@@ -208,6 +210,12 @@ float microfacetDistribution(PBRInfo pbrInputs)
     return roughnessSq / (M_PI * f * f);
 }
 
+float edgeFactor() {
+    vec3 d = fwidth(v_Barycentric);
+    vec3 a3 = smoothstep(vec3(0.0), d * u_WireframeLineWidth, v_Barycentric);
+    return min(min(a3.x, a3.y), a3.z);
+}
+
 void main()
 {
     // Metallic and Roughness material properties are packed together
@@ -310,10 +318,12 @@ void main()
     color = mix(color, vec3(D), u_ScaleFGDSpec.z);
     color = mix(color, specContrib, u_ScaleFGDSpec.w);
 
-    color = mix(color, diffuseContrib, u_ScaleDiffBaseMR.x);
+    color = mix(color, n, u_ScaleDiffBaseMR.x);
     color = mix(color, baseColor.rgb, u_ScaleDiffBaseMR.y);
     color = mix(color, vec3(metallic), u_ScaleDiffBaseMR.z);
     color = mix(color, vec3(perceptualRoughness), u_ScaleDiffBaseMR.w);
+
+    color = mix(color, u_WireframeLineColor, (1.0 - edgeFactor()));
 
     gl_FragColor = vec4(pow(color,vec3(1.0/2.2)), baseColor.a);
 }

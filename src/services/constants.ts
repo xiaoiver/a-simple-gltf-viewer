@@ -47,4 +47,17 @@ const WRAP_S: {
 };
 const WRAP_T = WRAP_S;
 
-export { SERVICE_IDENTIFIER, BRDFLUT_PATH, MIN_FILTER, MAG_FILTER, WRAP_S, WRAP_T };
+/**
+ * map to regl type
+ */
+const REGL_COMPONENT_TYPE_ARRAYS: { [index: number]: string } = {
+    5120: 'int8',
+    5121: 'uint8',
+    5122: 'int16',
+    5123: 'uint16',
+    5124: 'int32',
+    5125: 'uint32',
+    5126: 'float32'
+};
+
+export { SERVICE_IDENTIFIER, BRDFLUT_PATH, MIN_FILTER, MAG_FILTER, WRAP_S, WRAP_T, REGL_COMPONENT_TYPE_ARRAYS };

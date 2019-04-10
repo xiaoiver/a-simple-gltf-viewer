@@ -4,7 +4,7 @@
 import * as regl from 'regl';
 import { SERVICE_IDENTIFIER, WRAP_T, WRAP_S, MAG_FILTER, MIN_FILTER } from '@/services/constants';
 import { ICameraService } from '@/services/Camera';
-import { IGltfService } from '@/services/GltfService';
+import { IGltfService, IAttributeData } from '@/services/GltfService';
 import { IRendererService } from '@/services/Renderer';
 import { mat4 } from 'gl-matrix';
 import { Mesh, MaterialPbrMetallicRoughness, MaterialNormalTextureInfo, TextureInfo, MaterialOcclusionTextureInfo, Sampler } from 'gltf-loader-ts/lib/gltf';
@@ -45,9 +45,7 @@ export class SceneNode implements ISceneNodeService {
     private attributes: {[key: string]: any} = {};
     private uniforms: {[key: string]: any} = {};
     private defines: {[key: string]: number} = {...defaultDefines};
-    private indices: {
-        data: Uint8Array | Uint16Array | Float32Array | undefined;
-    };
+    private indices: IAttributeData;
     private textures: regl.Texture2D[] = [];
     private cullFace: boolean = true;
 
@@ -71,29 +69,28 @@ export class SceneNode implements ISceneNodeService {
          */
         await Promise.all(this.mesh.primitives.map(async ({ attributes, indices, material: materialIdx }) => {
             await Promise.all(Object.keys(attributes).map(async attributeName => {
-                const { data, offset, stride } = await this._gltf.getData(attributes[attributeName]);
+                const data = await this._gltf.getData(attributes[attributeName]);
                 switch (attributeName) {
                     case "POSITION": 
-                        this.addAttribute('a_Position', data, offset, stride);
+                        this.addAttribute('a_Position', data);
                         break;
                     case "NORMAL":
                         this.addDefine('HAS_NORMALS', 1);
-                        this.addAttribute('a_Normal', data, offset, stride);
+                        this.addAttribute('a_Normal', data);
                         break;
                     case "TANGENT":
                         this.addDefine('HAS_TANGENTS', 1);
-                        this.addAttribute('a_Tangent', data, offset, stride);
+                        this.addAttribute('a_Tangent', data);
                         break;
                     case "TEXCOORD_0":
                         this.addDefine('HAS_UV', 1);
-                        this.addAttribute('a_UV', data, offset, stride);
+                        this.addAttribute('a_UV', data);
                         break;
                 }
             }));
 
             if (indices !== undefined) {
-                const { data } = await this._gltf.getData(indices);
-                this.setIndices(data);
+                this.setIndices(await this._gltf.getData(indices));
             }
 
             if (materialIdx !== undefined) {
@@ -210,17 +207,8 @@ export class SceneNode implements ISceneNodeService {
         this.children.push(node);
     }
 
-    private addAttribute(attributeName: string, data: any, offset: number|undefined, stride: number|undefined) {
-        const regl = this._renderer.getRegl();
-        this.attributes[attributeName] = {
-            buffer: regl.buffer(data)
-        };
-        if (offset !== undefined) {
-            this.attributes[attributeName].offset = offset;
-        }
-        if (stride !== undefined) {
-            this.attributes[attributeName].stride = stride;
-        }
+    private addAttribute(attributeName: string, value: IAttributeData) {
+        this.attributes[attributeName] = value;
     }
 
     private addUniform(uniformName: string,
@@ -269,10 +257,8 @@ export class SceneNode implements ISceneNodeService {
         this.defines[defineName] = value;
     }
 
-    public setIndices(indices: Uint8Array | Uint16Array | Float32Array | undefined) {
-        this.indices = {
-            data: indices
-        };
+    private setIndices(data: IAttributeData) {
+        this.indices = data;
     }
 
     public buildDrawCommand(): void {
