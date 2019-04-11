@@ -34,6 +34,7 @@ export interface IRendererService {
     isSupportSRGB(): boolean;
 
     setSplitLayer(splitLayer: number[]): void;
+    setFinalSplit(finalSplit: number[]): void;
     setWireframeLineColor(color: number[]): void;
     setWireframeLineWidth(width: number): void;
 }
@@ -52,6 +53,7 @@ export class Renderer extends EventEmitter implements IRendererService {
      * style variables
      */
     private splitLayer: number[] = [0, 0, 0, 0];
+    private finalSplit: number[] = [0, 0, 0, 0];
     private wireframeLineColor: number[] = [0, 0, 0];
     private wireframeLineWidth: number = 1;
 
@@ -175,10 +177,12 @@ export class Renderer extends EventEmitter implements IRendererService {
                 // @ts-ignore
                 u_MVPMatrix: this._regl.prop('mvpMatrix'),
                 u_ScaleDiffBaseMR: () => this.splitLayer,
-                u_ScaleFGDSpec: [0, 0, 0, 0],
+                u_FinalSplit: () => this.finalSplit,
                 u_ScaleIBLAmbient: [1, 1, 0, 0],
                 u_WireframeLineColor: () => this.wireframeLineColor,
                 u_WireframeLineWidth: () => this.wireframeLineWidth,
+                u_ViewportWidth: this._regl.context('viewportWidth'),
+                u_ViewportHeight: this._regl.context('viewportHeight'),
                 ...uniforms,
                 ...this.sceneUniforms
             },
@@ -321,6 +325,10 @@ export class Renderer extends EventEmitter implements IRendererService {
         });
 
         this.sceneUniforms[uniformName] = cubeMap;
+    }
+
+    setFinalSplit(finalSplit: number[]) {
+        this.finalSplit = finalSplit;
     }
 
     setSplitLayer(splitLayer: number[]) {

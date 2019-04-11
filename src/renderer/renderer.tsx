@@ -6,22 +6,28 @@ import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import * as dat from 'dat.gui';
 import ReactLoading from 'react-loading';
+import Layers from './Layers';
 
 // Import the styles here to process them with webpack
 import '@public/style.css';
 
 class App extends React.Component<{}, {
   loading: boolean;
+  showLayers: boolean;
+  size: { width: number; height: number };
 }> {
   public readonly state = {
-    loading: false
+    loading: false,
+    showLayers: false,
+    size: { width: 1, height: 1 }
   };
 
   private viewer: GltfViewer;
   
   componentDidMount() {
     this.viewer = new GltfViewer({
-      container: 'viewer-container'
+      container: 'viewer-container',
+      onResize: this.handleResize
     });
     this.viewer.init();
 
@@ -31,9 +37,9 @@ class App extends React.Component<{}, {
     const models = ['Triangle', 'Box', 'BoxTextured', 'DamagedHelmet', 'Corset', 
       'MetalRoughSpheres'
     ];
-    const layers = ['all', 'albedo', 'normal', 'metallic', 'roughness'];
+    const layers = ['layers', 'final', 'albedo', 'normal', 'metallic', 'roughness', 'wireframe'];
 
-    const text = { Model: 'BoxTextured', Layer: 'all' };
+    const text = { Model: 'DamagedHelmet', Layer: 'layers' };
     folder.add(text, 'Model', models).onChange(this.loadModel);
     folder.add(text, 'Layer', layers).onChange(this.showLayer);
 
@@ -44,8 +50,8 @@ class App extends React.Component<{}, {
 
     folder.open();
 
-    this.showLayer('all');
-    this.loadModel('BoxTextured');
+    this.showLayer('layers');
+    this.loadModel('DamagedHelmet');
   }
 
   loadModel = async (modelName: string) => {
@@ -56,6 +62,7 @@ class App extends React.Component<{}, {
   };
 
   showLayer = (layerName: string) => {
+    this.setState({ showLayers: layerName === 'layers' });
     this.viewer.showLayer(layerName);
   };
 
@@ -67,8 +74,12 @@ class App extends React.Component<{}, {
     this.viewer.setWireframeLineWidth(width);
   }
 
+  handleResize = (size: { width: number; height: number }) => {
+    this.setState({ size });
+  }
+
   render() {
-    const { loading } = this.state;
+    const { loading, showLayers, size } = this.state;
     return <>
       {loading && <div style={{
         position: 'fixed',
@@ -79,6 +90,7 @@ class App extends React.Component<{}, {
       }}>
         <ReactLoading type="balls" color="blue" height={'64px'} width={'64px'}/></div>}
       <div id="viewer-container"></div>
+      {!loading && showLayers && <Layers size={size}/>}
     </>
   }
 }

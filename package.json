@@ -38,11 +38,13 @@
     "hammerjs": "^2.0.8",
     "inversify": "^5.0.1",
     "react": "^16.7.0",
+    "react-animations": "^1.0.0",
     "react-dom": "^16.7.0",
     "react-loading": "^2.0.3",
     "reflect-metadata": "^0.1.13",
     "regl": "^1.3.11",
-    "stats.js": "^0.17.0"
+    "stats.js": "^0.17.0",
+    "styled-components": "^4.2.0"
   },
   "devDependencies": {
     "@types/dat.gui": "^0.7.2",

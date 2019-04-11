@@ -18,6 +18,8 @@ precision highp float;
 
 uniform vec3 u_LightDirection;
 uniform vec3 u_LightColor;
+uniform float u_ViewportWidth;
+uniform float u_ViewportHeight;
 
 #ifdef USE_IBL
 uniform samplerCube u_DiffuseEnvSampler;
@@ -50,8 +52,8 @@ uniform vec4 u_BaseColorFactor;
 uniform vec3 u_Camera;
 
 // debugging flags used for shader output of intermediate PBR variables
+uniform vec4 u_FinalSplit;
 uniform vec4 u_ScaleDiffBaseMR;
-uniform vec4 u_ScaleFGDSpec;
 uniform vec4 u_ScaleIBLAmbient;
 uniform vec3 u_WireframeLineColor;
 uniform float u_WireframeLineWidth;
@@ -210,10 +212,23 @@ float microfacetDistribution(PBRInfo pbrInputs)
     return roughnessSq / (M_PI * f * f);
 }
 
+// wireframe
 float edgeFactor() {
     vec3 d = fwidth(v_Barycentric);
     vec3 a3 = smoothstep(vec3(0.0), d * u_WireframeLineWidth, v_Barycentric);
     return min(min(a3.x, a3.y), a3.z);
+}
+
+#define LAYER_RANGE_START 0.3
+#define LAYER_RANGE_END 0.7
+#define LAYER_NUM 6.0
+#define LAYER_WIDTH (LAYER_RANGE_END - LAYER_RANGE_START) / LAYER_NUM
+#define LAYER_OFFSET 0.1
+
+// edge function
+// https://www.scratchapixel.com/lessons/3d-basic-rendering/rasterization-practical-implementation/rasterization-stage
+bool edgeFunction(vec2 a, vec2 b, vec2 c) {
+    return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x) >= 0.;
 }
 
 void main()
@@ -311,19 +326,52 @@ void main()
     color += emissive;
 #endif
 
+    vec2 st = gl_FragCoord.xy / vec2(u_ViewportWidth, u_ViewportHeight);
+
+    // normal albedo metallic roughness
+    vec4 namr = u_ScaleDiffBaseMR;
+    // all split wireframe
+    vec4 asw = u_FinalSplit;
+
+    // need to split different panels
+    if (asw.y == 1.) {
+        vec2 firstEdgePoint1 = vec2(LAYER_RANGE_START + LAYER_OFFSET, 0.);
+        vec2 firstEdgePoint2 = vec2(LAYER_RANGE_START - LAYER_OFFSET, 1.);
+        bool f1 = edgeFunction(firstEdgePoint1 + vec2(LAYER_WIDTH * 1., 0.), firstEdgePoint2 + vec2(LAYER_WIDTH * 1., 0.), st);
+        bool f2 = edgeFunction(firstEdgePoint1 + vec2(LAYER_WIDTH * 2., 0.), firstEdgePoint2 + vec2(LAYER_WIDTH * 2., 0.), st);
+        bool f3 = edgeFunction(firstEdgePoint1 + vec2(LAYER_WIDTH * 3., 0.), firstEdgePoint2 + vec2(LAYER_WIDTH * 3., 0.), st);
+        bool f4 = edgeFunction(firstEdgePoint1 + vec2(LAYER_WIDTH * 4., 0.), firstEdgePoint2 + vec2(LAYER_WIDTH * 4., 0.), st);
+        bool f5 = edgeFunction(firstEdgePoint1 + vec2(LAYER_WIDTH * 5., 0.), firstEdgePoint2 + vec2(LAYER_WIDTH * 5., 0.), st);
+        if (!f1) {
+            namr.x = 1.;
+        } else if (f1 && !f2){
+            namr.y = 1.;
+        } else if (f2 && !f3){
+            namr.z = 1.;
+        } else if (f3 && !f4){
+            namr.w = 1.;
+        } else if (f4 && !f5){
+            asw.z = 1.;
+        }
+    }
+
     // This section uses mix to override final color for reference app visualization
     // of various parameters in the lighting equation.
-    color = mix(color, F, u_ScaleFGDSpec.x);
-    color = mix(color, vec3(G), u_ScaleFGDSpec.y);
-    color = mix(color, vec3(D), u_ScaleFGDSpec.z);
-    color = mix(color, specContrib, u_ScaleFGDSpec.w);
+    color = mix(color, n, namr.x);
+    color = mix(color, baseColor.rgb, namr.y);
+    color = mix(color, vec3(metallic), namr.z);
+    color = mix(color, vec3(perceptualRoughness), namr.w);
 
-    color = mix(color, n, u_ScaleDiffBaseMR.x);
-    color = mix(color, baseColor.rgb, u_ScaleDiffBaseMR.y);
-    color = mix(color, vec3(metallic), u_ScaleDiffBaseMR.z);
-    color = mix(color, vec3(perceptualRoughness), u_ScaleDiffBaseMR.w);
+    vec3 wireframeAoColor = vec3(1.);
+    #ifdef HAS_OCCLUSIONMAP
+        wireframeAoColor = mix(vec3(1.), vec3(1.) * ao, u_OcclusionStrength);
+    #endif
 
-    color = mix(color, u_WireframeLineColor, (1.0 - edgeFactor()));
+    // draw wireframe with ao
+    color = mix(color, 
+        mix(wireframeAoColor, u_WireframeLineColor, (1.0 - edgeFactor())),
+        asw.z
+    );
 
     gl_FragColor = vec4(pow(color,vec3(1.0/2.2)), baseColor.a);
 }
