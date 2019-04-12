@@ -231,6 +231,10 @@ bool edgeFunction(vec2 a, vec2 b, vec2 c) {
     return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x) >= 0.;
 }
 
+vec3 gammaCorrection(vec3 color) {
+    return pow(color, vec3(1.0 / 2.2));
+}
+
 void main()
 {
     // Metallic and Roughness material properties are packed together
@@ -327,6 +331,7 @@ void main()
 #endif
 
     vec2 st = gl_FragCoord.xy / vec2(u_ViewportWidth, u_ViewportHeight);
+    
 
     // normal albedo metallic roughness
     vec4 namr = u_ScaleDiffBaseMR;
@@ -373,5 +378,5 @@ void main()
         asw.z
     );
 
-    gl_FragColor = vec4(pow(color,vec3(1.0/2.2)), baseColor.a);
+    gl_FragColor = vec4(gammaCorrection(color), baseColor.a);
 }

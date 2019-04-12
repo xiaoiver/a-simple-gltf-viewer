@@ -4,10 +4,8 @@
  * translate or rotate along u, v, n axis,
  * and add pitch & roll which use fixed eye point for orbit mode
  */
-import { injectable, inject } from 'inversify';
+import { injectable } from 'inversify';
 import { mat4, vec3 } from 'gl-matrix';
-import { IRendererService, Renderer } from './Renderer';
-import { SERVICE_IDENTIFIER } from './constants';
 
 export interface ICameraService {
     eye: vec3;
@@ -50,8 +48,6 @@ export class Camera implements ICameraService {
     view: mat4 = mat4.create();
     transform: mat4 = mat4.create();
 
-    @inject(SERVICE_IDENTIFIER.RendererService) private renderer: IRendererService;
-
     init(eye: vec3, center: vec3, fovy: number, aspect: number, znear: number, zfar: number) {
         this.eye = eye;
         this.center = center;
@@ -60,18 +56,6 @@ export class Camera implements ICameraService {
         this.aspect = aspect;
         this.znear = znear;
         this.zfar = zfar;
-        
-        this.renderer.on(Renderer.READY_EVENT, () => {
-            this.updateProjection();
-            this.updateTransform();
-        });
-
-        this.renderer.on(Renderer.RESIZE_EVENT, (params: { width: number; height: number }[]) => {
-            const { width, height } = params[0];
-            this.aspect = width / height;
-            this.updateProjection();
-            this.updateTransform();
-        });
     }
 
     /**

@@ -17,6 +17,7 @@ export interface ISceneNodeService {
     addChild(node: ISceneNodeService): void;
     buildDrawCommand(): void;
     draw(parentTransform: mat4): void;
+    drawDepth(parentTransform: mat4): void;
     clean(): void;
 }
 
@@ -41,6 +42,7 @@ export class SceneNode implements ISceneNodeService {
     private mesh: Mesh;
     private children: ISceneNodeService[] = [];
     private drawCommand: regl.DrawCommand;
+    private drawDepthCommand: regl.DrawCommand;
 
     private attributes: {[key: string]: any} = {};
     private uniforms: {[key: string]: any} = {};
@@ -269,6 +271,10 @@ export class SceneNode implements ISceneNodeService {
             indices: this.indices,
             cullFace: this.cullFace
         });
+        this.drawDepthCommand = this._renderer.createDrawDepthCommand({
+            attributes: this.attributes,
+            indices: this.indices
+        });
     }
 
     public clean(): void {
@@ -282,7 +288,7 @@ export class SceneNode implements ISceneNodeService {
         this.uniforms = {};
     }
 
-    public async draw(parentTransform: mat4): Promise<void> {
+    public draw(parentTransform: mat4): void {
         const modelMatrix = mat4.create();
         mat4.multiply(modelMatrix, this.matrix, parentTransform);
 
@@ -297,8 +303,6 @@ export class SceneNode implements ISceneNodeService {
 
         if (this.mesh) {
             this.drawCommand({
-                // @ts-ignore
-                cameraPosition: this._camera.eye,
                 modelMatrix,
                 normalMatrix,
                 mvpMatrix
@@ -306,7 +310,20 @@ export class SceneNode implements ISceneNodeService {
         }
     
         for (const childNode of this.children) {
-            await childNode.draw(modelMatrix);
+            childNode.draw(modelMatrix);
+        }
+    }
+
+    public drawDepth(parentTransform: mat4): void {
+        const modelMatrix = mat4.create();
+        mat4.multiply(modelMatrix, this.matrix, parentTransform);
+        if (this.mesh) {
+            this.drawDepthCommand({
+                modelMatrix
+            });
+        }
+        for (const childNode of this.children) {
+            childNode.drawDepth(parentTransform);
         }
     }
 }

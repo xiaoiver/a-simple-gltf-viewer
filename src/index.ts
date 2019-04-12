@@ -27,7 +27,7 @@ interface GltfViewerOptions {
 }
 
 const defaultCamera = {
-    eye: [0, 2, 2],
+    eye: [0, 0, 4],
     center: [0, 0, 0],
     fovy: 45,
     near: 0.01,
@@ -98,5 +98,13 @@ export class GltfViewer {
 
     setWireframeLineWidth(width: number) {
         renderer.setWireframeLineWidth(width);
+    }
+
+    setDirectionalLightColor(color: number[]) {
+        renderer.setDirectionalLight({ color });
+    }
+
+    setDirectionalLightDiretion(direction: number[]) {
+        renderer.setDirectionalLight({ direction });
     }
 }

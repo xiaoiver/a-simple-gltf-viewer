@@ -6,15 +6,27 @@ import * as regl from 'regl';
 import * as Stats from 'stats.js';
 import { inject, injectable } from 'inversify';
 import { EventEmitter } from 'eventemitter3';
-import { SERVICE_IDENTIFIER, BRDFLUT_PATH, REGL_COMPONENT_TYPE_ARRAYS } from '@/services/constants';
+import { SERVICE_IDENTIFIER, BRDFLUT_PATH } from '@/services/constants';
 import { ISceneService } from '@/services/SceneService';
+import { ICameraService } from '@/services/Camera';
+import { IAttributeData } from '@/services/GltfService';
 // @ts-ignore
-import vert from '@/shaders/vert.glsl';
+import vert from '@/shaders/pbr-vert.glsl';
 // @ts-ignore
-import frag from '@/shaders/frag.glsl';
+import frag from '@/shaders/pbr-frag.glsl';
+// @ts-ignore
+import gridVert from '@/shaders/grid-vert.glsl';
+// @ts-ignore
+import gridFrag from '@/shaders/grid-frag.glsl';
+// @ts-ignore
+import shadowVert from '@/shaders/shadow-vert.glsl';
+// @ts-ignore
+import shadowFrag from '@/shaders/shadow-frag.glsl';
 import { loadImage } from '@/utils/asset';
-import { IAttributeData } from './GltfService';
-import { GLTF_COMPONENT_TYPE_ARRAYS, GLTF_ELEMENTS_PER_TYPE } from '_gltf-loader-ts@0.3.1@gltf-loader-ts';
+import { GLTF_COMPONENT_TYPE_ARRAYS, GLTF_ELEMENTS_PER_TYPE } from 'gltf-loader-ts/lib/gltf-loader';
+import { mat4, vec3 } from 'gl-matrix';
+
+const SHADOW_RES = 2048;
 
 interface drawParams {
     attributes: {[key: string]: IAttributeData};
@@ -24,6 +36,11 @@ interface drawParams {
     cullFace: boolean;
 }
 
+interface DirectionalLight {
+    direction: number[];
+    color: number[];
+}
+
 export interface IRendererService {
     on(name: string, cb: Function): void;
     init(container: string): void;
@@ -31,12 +48,14 @@ export interface IRendererService {
     getCanvas(): HTMLCanvasElement;
     getRegl(): regl.Regl;
     createDrawCommand(params: drawParams): regl.DrawCommand;
+    createDrawDepthCommand(params: Partial<drawParams>): regl.DrawCommand;
     isSupportSRGB(): boolean;
 
     setSplitLayer(splitLayer: number[]): void;
     setFinalSplit(finalSplit: number[]): void;
     setWireframeLineColor(color: number[]): void;
     setWireframeLineWidth(width: number): void;
+    setDirectionalLight(light: Partial<DirectionalLight>): void;
 }
 
 @injectable()
@@ -56,10 +75,18 @@ export class Renderer extends EventEmitter implements IRendererService {
     private finalSplit: number[] = [0, 0, 0, 0];
     private wireframeLineColor: number[] = [0, 0, 0];
     private wireframeLineWidth: number = 1;
+    private directionalLight: DirectionalLight = {
+        direction: [0, 0.5, 0.5],
+        color: [1, 1, 1]
+    };
 
     private defines: {[key: string]: number} = {
         USE_IBL: 1,
-        MANUAL_SRGB: 0,
+        // TODO: Since there's a bug in regl,
+        // we must do srgb conversion manually for now.
+        // @see https://github.com/xiaoiver/a-simple-gltf-viewer/issues/2
+        MANUAL_SRGB: 1,
+        SRGB_FAST_APPROXIMATION: 1,
         USE_TEX_LOD: 0
     };
 
@@ -68,6 +95,8 @@ export class Renderer extends EventEmitter implements IRendererService {
      * such as brdfLUT, diffuseEnv and specularEnv.
      */
     private sceneUniforms: {[key: string]: any} = {};
+    private drawGround: regl.DrawCommand;
+    private fbo: regl.Framebuffer2D;
 
     /**
      * WebGL extension flags
@@ -79,6 +108,7 @@ export class Renderer extends EventEmitter implements IRendererService {
     private inited: boolean = false;
 
     @inject(SERVICE_IDENTIFIER.SceneService) private _scene: ISceneService;
+    @inject(SERVICE_IDENTIFIER.CameraService) private _camera: ICameraService;
 
     private initStats() {
         this.stats = new Stats();
@@ -126,6 +156,8 @@ export class Renderer extends EventEmitter implements IRendererService {
         
         // reallocate attribute data
         let cursor = 0;
+        const bufferConstructor = GLTF_COMPONENT_TYPE_ARRAYS[indices.componentType];
+        const uniqueIndices = new bufferConstructor(indiceNum);
         for (var i = 0; i < indiceNum; i++) {
             var ii = indices.buffer[i];
 
@@ -136,7 +168,7 @@ export class Renderer extends EventEmitter implements IRendererService {
                     uniqueAttributes[name].buffer[cursor * size + k] = buffer[ii * size + k];
                 }
             });
-            indices.buffer[i] = cursor;
+            uniqueIndices[i] = cursor;
             cursor++;
         }
 
@@ -144,7 +176,7 @@ export class Renderer extends EventEmitter implements IRendererService {
         const barycentricBuffer = new Float32Array(indiceNum * 3);
         for (let i = 0; i < indiceNum;) {
             for (let j = 0; j < 3; j++) {
-                const ii = indices.buffer[i++];
+                const ii = uniqueIndices[i++];
                 barycentricBuffer[ii * 3 + j] = 1;
             }
         }
@@ -154,10 +186,13 @@ export class Renderer extends EventEmitter implements IRendererService {
 
         return {
             uniqueAttributes,
-            uniqueIndices: <Uint8Array|Uint16Array|Uint32Array>indices.buffer
+            uniqueIndices
         }
     }
 
+    /**
+     * every scene node can use this method to create its own draw command
+     */
     public createDrawCommand({ attributes, uniforms, defines, indices, cullFace }: drawParams) {
         const { uniqueAttributes, uniqueIndices } = this.generateBarycentric(attributes, indices);
 
@@ -166,10 +201,9 @@ export class Renderer extends EventEmitter implements IRendererService {
             frag: this.prefixDefines(frag, defines),
             attributes: uniqueAttributes,
             uniforms: {
-                u_LightDirection: [0, 0.5, 0.5],
-                u_LightColor: [1, 1, 1],
-                // @ts-ignore
-                u_Camera: this._regl.prop('cameraPosition'),
+                u_LightDirection: () => this.directionalLight.direction,
+                u_LightColor: () => this.directionalLight.color,
+                u_Camera: () => this._camera.eye,
                 // @ts-ignore
                 u_ModelMatrix: this._regl.prop('modelMatrix'),
                 // @ts-ignore
@@ -191,14 +225,150 @@ export class Renderer extends EventEmitter implements IRendererService {
                 enable: cullFace,
                 face: 'back'
             },
-            depth: {
-                enable: true
-            },
             elements: this._regl.elements({
                 primitive: 'triangles',
                 data: uniqueIndices
             })
         });
+    }
+
+    public createDrawDepthCommand({ attributes, indices }: drawParams) {
+        return this._regl({
+            vert: shadowVert,
+            frag: shadowFrag,
+            attributes: {
+                a_Position: attributes['a_Position'].buffer
+            },
+            uniforms: {
+                // @ts-ignore
+                u_MVPMatrixFromLight: (_, props) => {
+                    const vm = mat4.create();
+                    const projectionMatrix = mat4.create();
+                    mat4.lookAt(vm, this.directionalLight.direction, this._camera.center, this._camera.up);
+
+                    mat4.ortho(projectionMatrix, -25, 25, -20, 20, -25, 25);
+                    mat4.mul(projectionMatrix, projectionMatrix, vm);
+                    // @ts-ignore
+                    return mat4.mul(projectionMatrix, projectionMatrix, props.modelMatrix);
+                }
+            },
+            elements: this._regl.elements({
+                primitive: 'triangles',
+                data: <Uint8Array|Uint16Array|Uint32Array>indices.buffer
+            }),
+            framebuffer: this.fbo
+        });
+    }
+
+    /**
+     * draw a plane mesh with grid
+     */
+    private createDrawGroundCommand() {
+        this.drawGround = this._regl({
+            vert: gridVert,
+            frag: gridFrag,
+            attributes: {
+                a_Position: [
+                    [-4, -1, -4],
+                    [4, -1, -4],
+                    [4, -1, 4],
+                    [-4, -1, 4]
+                ],
+                a_Normal: [
+                    [0, -1, 0],
+                    [0, -1, 0],
+                    [0, -1, 0],
+                    [0, -1, 0]
+                ]
+            },
+            uniforms: {
+                u_MVPMatrix: () => this._camera.transform,
+                u_MVPMatrixFromLight: () => {
+                    const vm = mat4.create();
+                    const projectionMatrix = mat4.create();
+                    mat4.lookAt(vm, this.directionalLight.direction, this._camera.center, this._camera.up);
+
+                    mat4.ortho(projectionMatrix, -25, 25, -20, 20, -25, 25);
+                    mat4.mul(projectionMatrix, projectionMatrix, vm);
+                    return mat4.mul(projectionMatrix, projectionMatrix, mat4.create());
+                },
+                u_GridSize: 5,
+                u_GridSize2: 1,
+                u_GridColor: [0, 0, 0, 1],
+                u_GridColor2: [0.3, 0.3, 0.3, 1],
+                u_GridEnabled: true,
+                u_ShadowMap: () => this.fbo,
+                u_Camera: () => this._camera.eye,
+                u_LightDirection: () => this.directionalLight.direction
+            },
+            elements: [
+                [0, 2, 3],
+                [2, 0, 1]
+            ]
+        });
+    }
+
+    private async createRegl($container: HTMLElement) {
+        this._regl = await new Promise((resolve, reject) => {
+            regl({
+                container: $container,
+                extensions: [
+                    'EXT_shader_texture_lod', // IBL
+                    'OES_standard_derivatives', // wireframe
+                    'EXT_SRGB', // baseColor emmisive
+                    'OES_texture_float' // shadow map
+                ],
+                // profile: true,
+                onDone: (err, _regl) => {
+                    if (err || !_regl) {
+                        console.log(err);
+                        reject(err);
+                        return;
+                    }
+                    resolve(_regl);
+
+                    this.canvas = $container.getElementsByTagName('canvas')[0];
+                    this.emit(Renderer.READY_EVENT);
+                }
+            });
+        });
+
+        if (this._regl.hasExtension('EXT_SRGB')) {
+            this.supportSRGB = true;
+        } else {
+            /**
+             * if EXT_SRGB is not supported, we must converted to linear space in fragment shader manually.
+             * if supported, baseColorTexture, emissiveTexture & brdfLUT must use 'srgb' in regl.
+             */
+            this.defines['MANUAL_SRGB'] = 1;
+        }
+        if (this._regl.hasExtension('EXT_shader_texture_lod')) {
+            this.supportTextureLod = true;
+            this.defines['USE_TEX_LOD'] = 1;
+        }
+        if (this._regl.hasExtension('OES_standard_derivatives')) {
+            this.supportDerivatives = true;
+        }
+
+        // create a fbo for shadow map
+        this.fbo = this._regl.framebuffer({
+            color: this._regl.texture({
+                width: SHADOW_RES,
+                height: SHADOW_RES,
+                wrap: 'clamp',
+                type: 'float'
+            }),
+            depth: true
+        });
+    }
+
+    /**
+     * update VP matrix in camera when resize
+     */
+    private updateCamera() {
+        this._camera.aspect = this.canvas.width / this.canvas.height;
+        this._camera.updateProjection();
+        this._camera.updateTransform();
     }
 
     public async init(container: string): Promise<void> {
@@ -207,52 +377,16 @@ export class Renderer extends EventEmitter implements IRendererService {
         const $container = document.getElementById(container);
         if ($container) {
             // create a fullscreen canvas
-            this._regl = await new Promise((resolve, reject) => {
-                regl({
-                    container: $container,
-                    extensions: [
-                        'EXT_shader_texture_lod',
-                        'OES_standard_derivatives',
-                        'EXT_SRGB'
-                    ],
-                    // profile: true,
-                    onDone: (err, _regl) => {
-                        if (err || !_regl) {
-                            console.log(err);
-                            reject(err);
-                            return;
-                        }
+            await this.createRegl($container);
 
-                        if (_regl.hasExtension('EXT_SRGB')) {
-                            this.supportSRGB = true;
-                        } else {
-                            /**
-                             * if EXT_SRGB is not supported, we must converted to linear space in fragment shader manually.
-                             * if supported, baseColorTexture, emissiveTexture & brdfLUT must use 'srgb' in regl.
-                             */
-                            this.defines['MANUAL_SRGB'] = 1;
-                        }
-                        if (_regl.hasExtension('EXT_shader_texture_lod')) {
-                            this.supportTextureLod = true;
-                            this.defines['USE_TEX_LOD'] = 1;
-                        }
-                        if (_regl.hasExtension('OES_standard_derivatives')) {
-                            this.supportDerivatives = true;
-                        }
-
-                        resolve(_regl);
-                        this.canvas = $container.getElementsByTagName('canvas')[0];
-                        this.emit(Renderer.READY_EVENT);
-                    }
-                });
-            });
-
+            this.updateCamera();
             window.addEventListener('resize', () => {
+                this.updateCamera();
                 this.emit(Renderer.RESIZE_EVENT, [{
                     width: this.canvas.width,
                     height: this.canvas.height
                 }]);
-            });            
+            });
         } else {
             throw new Error(`${container} container is not exist.`);
         }
@@ -343,6 +477,10 @@ export class Renderer extends EventEmitter implements IRendererService {
         this.wireframeLineWidth = width;
     }
 
+    setDirectionalLight(light: Partial<DirectionalLight>) {
+        this.directionalLight = { ...this.directionalLight, ...light };
+    }
+
     public async render() {
         if (!this.inited) {
             // load resources relative to current environment only once
@@ -355,14 +493,22 @@ export class Renderer extends EventEmitter implements IRendererService {
         await this._scene.init();
 
         if (!this.inited) {
+            this.createDrawGroundCommand();
             this._regl.frame(() => {
                 this._regl.clear({
                     color: [0.2, 0.2, 0.2, 1],
                     depth: 1
                 });
 
-                this.stats.update();
+                // shadow map pass
+                this._scene.drawDepth();
+
+                // lighting pass
+                this.drawGround();                
                 this._scene.draw();
+
+                // update stats.js
+                this.stats.update();
                 this.emit(Renderer.FRAME_EVENT);
             });
             this.inited = true;

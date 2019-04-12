@@ -26,7 +26,6 @@ varying vec3 v_Normal;
 #endif
 #endif
 
-
 void main() {
     v_Barycentric = a_Barycentric;
 

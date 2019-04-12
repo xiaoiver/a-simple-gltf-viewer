@@ -29,7 +29,7 @@ const SlideInDiv = styled.div`
     overflow: hidden;
     user-select: none;
     pointer-events: none;
-    animation: 1s ${slideInAnimation};
+    animation: 0.5s ${slideInAnimation};
 `;
 
 const LayerLine = styled.div`

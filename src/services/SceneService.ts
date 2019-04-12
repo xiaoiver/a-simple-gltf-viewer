@@ -12,6 +12,7 @@ import { ISceneNodeService, SceneNode } from '@/services/Node';
 export interface ISceneService {
     init(): Promise<void>;
     draw(): void;
+    drawDepth(): void;
 }
 
 /**
@@ -86,6 +87,12 @@ export class SceneService implements ISceneService {
     public draw(): void {
         this.nodes.forEach((node: SceneNode) => {
             node.draw(mat4.create());
+        });
+    }
+
+    public drawDepth(): void {
+        this.nodes.forEach((node: SceneNode) => {
+            node.drawDepth(mat4.create());
         });
     }
 }

@@ -48,6 +48,13 @@ class App extends React.Component<{}, {
     wireframeFolder.addColor(wireframe, 'lineColor').onChange(this.changeWireframeLineColor);
     wireframeFolder.add(wireframe, 'lineWidth', 1, 5).onChange(this.changeWireframeLineWidth);
 
+    const lightFolder = folder.addFolder('directional light');
+    const directionalLight = { color: [0, 0, 0], rotation: 0, pitch: 0 };
+    lightFolder.addColor(directionalLight, 'color').onChange(this.changeDirectionalLightColor);
+    lightFolder.add(directionalLight, 'rotation', 0, 360)
+      .onChange(() => this.changeDirectionalLightDirection(directionalLight.rotation, directionalLight.pitch));
+    lightFolder.add(directionalLight, 'pitch', -90, 90)
+      .onChange(() => this.changeDirectionalLightDirection(directionalLight.rotation, directionalLight.pitch));
     folder.open();
 
     this.showLayer('layers');
@@ -72,6 +79,21 @@ class App extends React.Component<{}, {
   
   changeWireframeLineWidth = (width: number) => {
     this.viewer.setWireframeLineWidth(width);
+  }
+
+  changeDirectionalLightColor = (color: number[]) => {
+    this.viewer.setDirectionalLightColor(color.map(c => c / 255));
+  }
+
+  changeDirectionalLightDirection = (rotation: number, pitch: number) => {
+    var rot = rotation * Math.PI / 180;
+    var pitch = pitch * Math.PI / 180;
+
+    this.viewer.setDirectionalLightDiretion([
+      Math.sin(rot) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(rot) * Math.cos(pitch)
+    ]);
   }
 
   handleResize = (size: { width: number; height: number }) => {
