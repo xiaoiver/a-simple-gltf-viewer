@@ -7,12 +7,14 @@ import { IGltfService } from '@/services/GltfService';
 import { IRendererService, Renderer } from '@/services/Renderer';
 import { ICameraService } from '@/services/Camera';
 import { IMouseService } from '@/services/Mouse';
+import { IStatsService } from '@/services/Stats';
 import { vec3 } from 'gl-matrix';
 
 const gltfService = container.get<IGltfService>(SERVICE_IDENTIFIER.GltfService);
 const renderer = container.get<IRendererService>(SERVICE_IDENTIFIER.RendererService);
 const cameraService = container.get<ICameraService>(SERVICE_IDENTIFIER.CameraService);
 container.get<IMouseService>(SERVICE_IDENTIFIER.MouseService);
+container.get<IStatsService>(SERVICE_IDENTIFIER.StatsService);
 
 interface GltfViewerOptions {
     container: string;

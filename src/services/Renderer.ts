@@ -3,7 +3,6 @@
  * @see https://github.com/regl-project/regl/blob/gh-pages/API.md
  */
 import * as regl from 'regl';
-import * as Stats from 'stats.js';
 import { inject, injectable } from 'inversify';
 import { EventEmitter } from 'eventemitter3';
 import { SERVICE_IDENTIFIER, BRDFLUT_PATH } from '@/services/constants';
@@ -65,7 +64,6 @@ export class Renderer extends EventEmitter implements IRendererService {
     static RESIZE_EVENT = 'resize';
 
     private _regl: regl.Regl;
-    private stats: Stats;
     private canvas: HTMLCanvasElement;
 
     /**
@@ -109,16 +107,6 @@ export class Renderer extends EventEmitter implements IRendererService {
 
     @inject(SERVICE_IDENTIFIER.SceneService) private _scene: ISceneService;
     @inject(SERVICE_IDENTIFIER.CameraService) private _camera: ICameraService;
-
-    private initStats() {
-        this.stats = new Stats();
-        this.stats.showPanel(0);
-        const $stats = this.stats.dom;
-        $stats.style.position = 'absolute';
-        $stats.style.left = '0px';
-        $stats.style.top = '0px';
-        document.body.appendChild($stats);
-    }
 
     private prefixDefines(glsl: string, defines: any): string {
         const d = { ...this.defines, ...defines };
@@ -275,10 +263,10 @@ export class Renderer extends EventEmitter implements IRendererService {
                     [-4, -1, 4]
                 ],
                 a_Normal: [
-                    [0, -1, 0],
-                    [0, -1, 0],
-                    [0, -1, 0],
-                    [0, -1, 0]
+                    [0, 0, 1],
+                    [0, 0, 1],
+                    [0, 0, 1],
+                    [0, 0, 1]
                 ]
             },
             uniforms: {
@@ -299,6 +287,7 @@ export class Renderer extends EventEmitter implements IRendererService {
                 u_GridEnabled: true,
                 u_ShadowMap: () => this.fbo,
                 u_Camera: () => this._camera.eye,
+                u_LightColor: () => this.directionalLight.color,
                 u_LightDirection: () => this.directionalLight.direction
             },
             elements: [
@@ -372,8 +361,6 @@ export class Renderer extends EventEmitter implements IRendererService {
     }
 
     public async init(container: string): Promise<void> {
-        this.initStats();
-
         const $container = document.getElementById(container);
         if ($container) {
             // create a fullscreen canvas
@@ -497,7 +484,8 @@ export class Renderer extends EventEmitter implements IRendererService {
             this._regl.frame(() => {
                 this._regl.clear({
                     color: [0.2, 0.2, 0.2, 1],
-                    depth: 1
+                    depth: 1,
+                    framebuffer: this.fbo
                 });
 
                 // shadow map pass
@@ -507,8 +495,6 @@ export class Renderer extends EventEmitter implements IRendererService {
                 this.drawGround();                
                 this._scene.draw();
 
-                // update stats.js
-                this.stats.update();
                 this.emit(Renderer.FRAME_EVENT);
             });
             this.inited = true;

@@ -2,6 +2,8 @@ const lodash = require('lodash');
 const CopyPkgJsonPlugin = require('copy-pkg-json-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const { InjectManifest } = require('workbox-webpack-plugin');
+const tsImportPluginFactory = require('ts-import-plugin');
 const path = require('path');
 
 function srcPaths(src) {
@@ -31,9 +33,22 @@ const commonConfig = {
   module: {
     rules: [
       {
-        test: /\.(ts|tsx)$/,
-        exclude: /node_modules/,
+        test: /\.(jsx|tsx|js|ts)$/,
         loader: 'ts-loader',
+        options: {
+          transpileOnly: true,
+          getCustomTransformers: () => ({
+            before: [ tsImportPluginFactory({
+              libraryName: 'antd',
+              libraryDirectory: 'lib',
+              style: 'css'
+            }) ]
+          }),
+          compilerOptions: {
+            module: 'es2015'
+          }
+        },
+        exclude: /node_modules/
       },
       {
         test: /\.(glsl)$/,
@@ -79,8 +94,20 @@ rendererConfig.plugins = [
     template: path.resolve(__dirname, './public/index.html'),
   }),
   new CopyPlugin([
-    { from: srcPaths('public/textures'), to: srcPaths('docs/textures') },
+    { from: srcPaths('static'), to: srcPaths('docs') },
   ])
 ];
+
+if (isEnvProduction) {
+  rendererConfig.plugins.push(
+    // @see https://github.com/xiaoiver/sw-tools/issues/1
+    new InjectManifest({
+      swSrc: srcPaths('src/service-worker.js'),
+      swDest: 'service-worker.js',
+      exclude: [/\.png|\.DS_Store$/],
+      importWorkboxFrom: 'local'
+    })
+  );
+}
 
 module.exports = [mainConfig, rendererConfig];

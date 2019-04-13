@@ -1,12 +1,13 @@
-import { TextureMinFilterType, TextureMagFilterType, TextureWrapModeType } from "regl";
+import { TextureMinFilterType, TextureMagFilterType, TextureWrapModeType } from 'regl';
 
 const SERVICE_IDENTIFIER = {
-    GltfService: Symbol.for("GltfService"),
-    SceneService: Symbol.for("SceneService"),
-    SceneNodeService: Symbol.for("SceneNodeService"),
-    RendererService: Symbol.for("RendererService"),
-    CameraService: Symbol.for("CameraService"),
-    MouseService: Symbol.for("MouseService"),
+    GltfService: Symbol.for('GltfService'),
+    SceneService: Symbol.for('SceneService'),
+    SceneNodeService: Symbol.for('SceneNodeService'),
+    RendererService: Symbol.for('RendererService'),
+    CameraService: Symbol.for('CameraService'),
+    MouseService: Symbol.for('MouseService'),
+    StatsService: Symbol.for('StatsService'),
 };
 
 const BRDFLUT_PATH = 'textures/brdfLUT.png';

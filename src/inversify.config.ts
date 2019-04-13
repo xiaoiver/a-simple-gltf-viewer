@@ -8,9 +8,11 @@ import { GltfService, IGltfService } from '@/services/GltfService';
 import { IRendererService, Renderer } from '@/services/Renderer';
 import { ISceneService, SceneService } from '@/services/SceneService';
 import { IMouseService, Mouse } from '@/services/Mouse';
+import { StatsService, IStatsService } from '@/services/Stats';
 import { ISceneNodeService, SceneNode } from '@/services/Node';
 import { EventEmitter } from 'eventemitter3';
 import { Container, decorate, injectable } from 'inversify';
+
 
 const container: Container = new Container();
 container.bind<IGltfService>(SERVICE_IDENTIFIER.GltfService)
@@ -25,6 +27,8 @@ container.bind<ICameraService>(SERVICE_IDENTIFIER.CameraService)
     .to(Camera).inSingletonScope();
 container.bind<IMouseService>(SERVICE_IDENTIFIER.MouseService)
     .to(Mouse).inSingletonScope();
+container.bind<IStatsService>(SERVICE_IDENTIFIER.StatsService)
+    .to(StatsService).inSingletonScope();
 
 decorate(injectable(), EventEmitter);
 

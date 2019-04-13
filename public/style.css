@@ -7,6 +7,14 @@
   z-index: 1;
 }
 
+.dg.ac select {
+  color: black;
+}
+
+.dg.ac input {
+  line-height: initial;
+}
+
 #viewer-container {
   position: fixed;
   top: 0;

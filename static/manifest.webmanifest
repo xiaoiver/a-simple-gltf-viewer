@@ -1,0 +1,20 @@
+{
+    "name": "A simple glTF viewer",
+    "short_name": "A simple glTF viewer",
+    "icons": [
+        {
+            "src": "./icons/logo-128.png",
+            "sizes": "128x128"
+        },
+        {
+            "src": "./icons/logo-144.png",
+            "sizes": "144x144"
+        }
+    ],
+    "display": "fullscreen",
+    "scope": "/",
+    "start_url": "./?homescreen=true",
+    "orientation": "portrait",
+    "theme_color": "#1abc9c",
+    "background_color": "#2c3e50"
+}

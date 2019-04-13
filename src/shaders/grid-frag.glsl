@@ -16,6 +16,7 @@ uniform bool u_GridEnabled;
 
 uniform sampler2D u_ShadowMap;
 uniform vec3 u_LightDirection;
+uniform vec3 u_LightColor;
 uniform vec3 u_Camera;
 
 // shadow map
@@ -64,31 +65,39 @@ float calcShadow(sampler2D depths, vec4 positionFromLight, vec3 lightDir, vec3 n
 }
 
 void main() {
-    vec3 n = v_Normal;                             // normal at surface point
-    vec3 v = normalize(u_Camera - v_Position);        // Vector from surface point to camera
-    vec3 l = normalize(u_LightDirection);             // Vector from surface point to light
+    vec3 n = v_Normal;
+    vec3 v = normalize(u_Camera - v_Position);
+    vec3 l = normalize(u_LightDirection);
+    
+    float NdotL = clamp(dot(n, l), 0.001, 1.0);
+
+    gl_FragColor = vec4(1.);
+
+    // if (u_GridEnabled) {
+    //     float wx = v_Position.x;
+    //     float wz = v_Position.z;
+    //     float x0 = abs(fract(wx / u_GridSize - 0.5) - 0.5) / fwidth(wx) * u_GridSize / 2.0;
+    //     float z0 = abs(fract(wz / u_GridSize - 0.5) - 0.5) / fwidth(wz) * u_GridSize / 2.0;
+
+    //     float x1 = abs(fract(wx / u_GridSize2 - 0.5) - 0.5) / fwidth(wx) * u_GridSize2;
+    //     float z1 = abs(fract(wz / u_GridSize2 - 0.5) - 0.5) / fwidth(wz) * u_GridSize2;
+
+    //     float v0 = 1.0 - clamp(min(x0, z0), 0.0, 1.0);
+    //     float v1 = 1.0 - clamp(min(x1, z1), 0.0, 1.0);
+    //     if (v0 > 0.1) {
+    //         gl_FragColor = mix(gl_FragColor, u_GridColor, v0);
+    //     }
+    //     else {
+    //         gl_FragColor = mix(gl_FragColor, u_GridColor2, v1);
+    //     }
+    // }
+
 
     // Shadow map
     float shadowFactor = calcShadow(u_ShadowMap, v_PositionFromLight, l, n);
 
-    gl_FragColor = vec4(vec3(1. - shadowFactor), 1.);
+    vec3 diffuseColor = u_LightColor * NdotL * shadowFactor;
 
-    if (u_GridEnabled) {
-        float wx = v_Position.x;
-        float wz = v_Position.z;
-        float x0 = abs(fract(wx / u_GridSize - 0.5) - 0.5) / fwidth(wx) * u_GridSize / 2.0;
-        float z0 = abs(fract(wz / u_GridSize - 0.5) - 0.5) / fwidth(wz) * u_GridSize / 2.0;
-
-        float x1 = abs(fract(wx / u_GridSize2 - 0.5) - 0.5) / fwidth(wx) * u_GridSize2;
-        float z1 = abs(fract(wz / u_GridSize2 - 0.5) - 0.5) / fwidth(wz) * u_GridSize2;
-
-        float v0 = 1.0 - clamp(min(x0, z0), 0.0, 1.0);
-        float v1 = 1.0 - clamp(min(x1, z1), 0.0, 1.0);
-        if (v0 > 0.1) {
-            gl_FragColor = mix(gl_FragColor, u_GridColor, v0);
-        }
-        else {
-            gl_FragColor = mix(gl_FragColor, u_GridColor2, v1);
-        }
-    }
+    gl_FragColor.rgb *= diffuseColor;
+    // gl_FragColor.a *= 1.0 - clamp(length(v_Position.xz) / 30.0, 0.0, 1.0);
 }
