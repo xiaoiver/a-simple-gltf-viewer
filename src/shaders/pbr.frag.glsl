@@ -55,11 +55,8 @@ uniform vec3 u_Camera;
 uniform vec4 u_FinalSplit;
 uniform vec4 u_ScaleDiffBaseMR;
 uniform vec4 u_ScaleIBLAmbient;
-uniform vec3 u_WireframeLineColor;
-uniform float u_WireframeLineWidth;
 
 varying vec3 v_Position;
-varying vec3 v_Barycentric;
 varying vec2 v_UV;
 
 #ifdef HAS_NORMALS
@@ -89,7 +86,10 @@ struct PBRInfo
     vec3 specularColor;           // color contribution from specular lighting
 };
 
-const float M_PI = 3.141592653589793;
+#pragma include "common"
+#pragma include "wireframe"
+#pragma include "split-layer"
+
 const float c_MinRoughness = 0.04;
 
 vec4 SRGBtoLINEAR(vec4 srgbIn)
@@ -187,19 +187,20 @@ vec3 specularReflection(PBRInfo pbrInputs)
     return pbrInputs.reflectance0 + (pbrInputs.reflectance90 - pbrInputs.reflectance0) * pow(clamp(1.0 - pbrInputs.VdotH, 0.0, 1.0), 5.0);
 }
 
-// This calculates the specular geometric attenuation (aka G()),
-// where rougher material will reflect less light back to the viewer.
-// This implementation is based on [1] Equation 4, and we adopt their modifications to
-// alphaRoughness as input as originally proposed in [2].
-float geometricOcclusion(PBRInfo pbrInputs)
+// Smith Joint GGX
+// Note: Vis = G / (4 * NdotL * NdotV)
+// see Eric Heitz. 2014. Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs. Journal of Computer Graphics Techniques, 3
+// see Real-Time Rendering. Page 331 to 336.
+// see https://google.github.io/filament/Filament.md.html#materialsystem/specularbrdf/geometricshadowing(specularg)
+float visibilityOcclusion(PBRInfo pbrInputs)
 {
     float NdotL = pbrInputs.NdotL;
     float NdotV = pbrInputs.NdotV;
-    float r = pbrInputs.alphaRoughness;
+    float alphaRoughnessSq = pbrInputs.alphaRoughness * pbrInputs.alphaRoughness;
 
-    float attenuationL = 2.0 * NdotL / (NdotL + sqrt(r * r + (1.0 - r * r) * (NdotL * NdotL)));
-    float attenuationV = 2.0 * NdotV / (NdotV + sqrt(r * r + (1.0 - r * r) * (NdotV * NdotV)));
-    return attenuationL * attenuationV;
+    float GGXV = NdotL * sqrt(NdotV * NdotV * (1.0 - alphaRoughnessSq) + alphaRoughnessSq);
+    float GGXL = NdotV * sqrt(NdotL * NdotL * (1.0 - alphaRoughnessSq) + alphaRoughnessSq);
+    return 0.5 / (GGXV + GGXL);
 }
 
 // The following equation(s) model the distribution of microfacet normals across the area being drawn (aka D())
@@ -210,25 +211,6 @@ float microfacetDistribution(PBRInfo pbrInputs)
     float roughnessSq = pbrInputs.alphaRoughness * pbrInputs.alphaRoughness;
     float f = (pbrInputs.NdotH * roughnessSq - pbrInputs.NdotH) * pbrInputs.NdotH + 1.0;
     return roughnessSq / (M_PI * f * f);
-}
-
-// wireframe
-float edgeFactor() {
-    vec3 d = fwidth(v_Barycentric);
-    vec3 a3 = smoothstep(vec3(0.0), d * u_WireframeLineWidth, v_Barycentric);
-    return min(min(a3.x, a3.y), a3.z);
-}
-
-#define LAYER_RANGE_START 0.3
-#define LAYER_RANGE_END 0.7
-#define LAYER_NUM 6.0
-#define LAYER_WIDTH (LAYER_RANGE_END - LAYER_RANGE_START) / LAYER_NUM
-#define LAYER_OFFSET 0.1
-
-// edge function
-// https://www.scratchapixel.com/lessons/3d-basic-rendering/rasterization-practical-implementation/rasterization-stage
-bool edgeFunction(vec2 a, vec2 b, vec2 c) {
-    return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x) >= 0.;
 }
 
 vec3 gammaCorrection(vec3 color) {
@@ -305,12 +287,12 @@ void main()
 
     // Calculate the shading terms for the microfacet specular shading model
     vec3 F = specularReflection(pbrInputs);
-    float G = geometricOcclusion(pbrInputs);
+    float Vis = visibilityOcclusion(pbrInputs);
     float D = microfacetDistribution(pbrInputs);
 
     // Calculation of analytical lighting contribution
     vec3 diffuseContrib = (1.0 - F) * diffuse(pbrInputs);
-    vec3 specContrib = F * G * D / (4.0 * NdotL * NdotV);
+    vec3 specContrib = F * Vis * D;
     // Obtain final intensity as reflectance (BRDF) scaled by the energy of the light (cosine law)
     vec3 color = NdotL * u_LightColor * (diffuseContrib + specContrib);
 
@@ -331,7 +313,6 @@ void main()
 #endif
 
     vec2 st = gl_FragCoord.xy / vec2(u_ViewportWidth, u_ViewportHeight);
-    
 
     // normal albedo metallic roughness
     vec4 namr = u_ScaleDiffBaseMR;

@@ -8,6 +8,13 @@ const SERVICE_IDENTIFIER = {
     CameraService: Symbol.for('CameraService'),
     MouseService: Symbol.for('MouseService'),
     StatsService: Symbol.for('StatsService'),
+    StyleService: Symbol.for('StyleService'),
+    PostProcessorService: Symbol.for('PostProcessorService'),
+    WebGLContextService: Symbol.for('WebGLContextService'),
+
+    BlurHPass: Symbol.for('BlurHPass'),
+    BlurVPass: Symbol.for('BlurVPass'),
+    CopyPass: Symbol.for('CopyPass'),
 };
 
 const BRDFLUT_PATH = 'textures/brdfLUT.png';

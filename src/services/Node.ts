@@ -9,6 +9,7 @@ import { IRendererService } from '@/services/Renderer';
 import { mat4 } from 'gl-matrix';
 import { Mesh, MaterialPbrMetallicRoughness, MaterialNormalTextureInfo, TextureInfo, MaterialOcclusionTextureInfo, Sampler } from 'gltf-loader-ts/lib/gltf';
 import { inject, injectable } from 'inversify';
+import { IWebGLContextService } from './Regl';
 
 export interface ISceneNodeService {
     setId(id: number): void;
@@ -51,6 +52,7 @@ export class SceneNode implements ISceneNodeService {
     private textures: regl.Texture2D[] = [];
     private cullFace: boolean = true;
 
+    @inject(SERVICE_IDENTIFIER.WebGLContextService) private _context: IWebGLContextService;
     @inject(SERVICE_IDENTIFIER.GltfService) private _gltf: IGltfService;
     @inject(SERVICE_IDENTIFIER.RendererService) private _renderer: IRendererService;
     @inject(SERVICE_IDENTIFIER.CameraService) private _camera: ICameraService;
@@ -147,7 +149,7 @@ export class SceneNode implements ISceneNodeService {
             const image = await this._gltf.getImage(index);
             const sampler = this._gltf.getSampler(index);
             this.addUniform('u_EmissiveSampler', {
-                image, sampler, format: this._renderer.isSupportSRGB() ? 'srgb' : 'rgba'
+                image, sampler, format: this._context.isSupportSRGB() ? 'srgb' : 'rgba'
             }, 'texture');
             this.addUniform('u_EmissiveFactor', emissiveFactor || [0.0, 0.0, 0.0]);
             this.addDefine('HAS_EMISSIVEMAP', 1);
@@ -181,7 +183,7 @@ export class SceneNode implements ISceneNodeService {
                 this.addDefine('HAS_BASECOLORMAP', 1);
                 this.addUniform('u_BaseColorSampler', {
                     image, sampler,
-                    format: this._renderer.isSupportSRGB() ? 'srgb' : 'rgba'
+                    format: this._context.isSupportSRGB() ? 'srgb' : 'rgba'
                 }, 'texture');
             }
         }
@@ -216,7 +218,7 @@ export class SceneNode implements ISceneNodeService {
     private addUniform(uniformName: string,
         value: { image: HTMLImageElement, sampler: Sampler, format: regl.TextureFormatType }|any,
         type?: string) {
-        const regl = this._renderer.getRegl();
+        const _regl = this._context.getContext();
         if (type === 'texture') {
             const { image, sampler, format = 'rgba' } = value;
             /**
@@ -248,7 +250,7 @@ export class SceneNode implements ISceneNodeService {
                     textureParams.wrapT = WRAP_T[sampler.wrapT];
                 }
             }
-            this.uniforms[uniformName] = regl.texture(textureParams);
+            this.uniforms[uniformName] = _regl.texture(textureParams);
             this.textures.push(this.uniforms[uniformName]);
         } else {
             this.uniforms[uniformName] = value;

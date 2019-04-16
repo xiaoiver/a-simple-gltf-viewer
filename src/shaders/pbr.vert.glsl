@@ -1,5 +1,5 @@
 attribute vec3 a_Position;
-attribute vec3 a_Barycentric;
+
 #ifdef HAS_NORMALS
 attribute vec3 a_Normal;
 #endif
@@ -16,7 +16,6 @@ uniform mat4 u_NormalMatrix;
 
 varying vec3 v_Position;
 varying vec2 v_UV;
-varying vec3 v_Barycentric;
 
 #ifdef HAS_NORMALS
 #ifdef HAS_TANGENTS
@@ -25,6 +24,8 @@ varying mat3 v_TBN;
 varying vec3 v_Normal;
 #endif
 #endif
+
+#pragma include "wireframe"
 
 void main() {
     v_Barycentric = a_Barycentric;

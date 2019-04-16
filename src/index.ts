@@ -9,10 +9,14 @@ import { ICameraService } from '@/services/Camera';
 import { IMouseService } from '@/services/Mouse';
 import { IStatsService } from '@/services/Stats';
 import { vec3 } from 'gl-matrix';
+import { IStyleService } from './services/Style';
+import { IPostProcessorService } from './services/PostProcessor';
 
 const gltfService = container.get<IGltfService>(SERVICE_IDENTIFIER.GltfService);
 const renderer = container.get<IRendererService>(SERVICE_IDENTIFIER.RendererService);
 const cameraService = container.get<ICameraService>(SERVICE_IDENTIFIER.CameraService);
+const styleService = container.get<IStyleService>(SERVICE_IDENTIFIER.StyleService);
+container.get<IPostProcessorService>(SERVICE_IDENTIFIER.PostProcessorService);
 container.get<IMouseService>(SERVICE_IDENTIFIER.MouseService);
 container.get<IStatsService>(SERVICE_IDENTIFIER.StatsService);
 
@@ -64,49 +68,49 @@ export class GltfViewer {
     showLayer(layerName: string) {
         switch (layerName) {
             case 'layers':
-                renderer.setFinalSplit([0, 1, 0, 0]);
-                renderer.setSplitLayer([0, 0, 0, 0]);
+                styleService.setFinalSplit([0, 1, 0, 0]);
+                styleService.setSplitLayer([0, 0, 0, 0]);
                 break;
             case 'final':
-                renderer.setFinalSplit([1, 0, 0, 0]);
-                renderer.setSplitLayer([0, 0, 0, 0]);
+                styleService.setFinalSplit([1, 0, 0, 0]);
+                styleService.setSplitLayer([0, 0, 0, 0]);
                 break;
             case 'normal':
-                renderer.setFinalSplit([1, 0, 0, 0]);
-                renderer.setSplitLayer([1, 0, 0, 0]);
+                styleService.setFinalSplit([1, 0, 0, 0]);
+                styleService.setSplitLayer([1, 0, 0, 0]);
                 break;
             case 'albedo':
-                renderer.setFinalSplit([1, 0, 0, 0]);
-                renderer.setSplitLayer([0, 1, 0, 0]);
+                styleService.setFinalSplit([1, 0, 0, 0]);
+                styleService.setSplitLayer([0, 1, 0, 0]);
                 break;
             case 'metallic':
-                renderer.setFinalSplit([1, 0, 0, 0]);
-                renderer.setSplitLayer([0, 0, 1, 0]);
+                styleService.setFinalSplit([1, 0, 0, 0]);
+                styleService.setSplitLayer([0, 0, 1, 0]);
                 break;
             case 'roughness':
-                renderer.setFinalSplit([1, 0, 0, 0]);
-                renderer.setSplitLayer([0, 0, 0, 1]);
+                styleService.setFinalSplit([1, 0, 0, 0]);
+                styleService.setSplitLayer([0, 0, 0, 1]);
                 break;
             case 'wireframe':
-                renderer.setFinalSplit([1, 0, 1, 0]);
-                renderer.setSplitLayer([0, 0, 0, 0]);
+                styleService.setFinalSplit([1, 0, 1, 0]);
+                styleService.setSplitLayer([0, 0, 0, 0]);
                 break;
         }
     }
 
     setWireframeLineColor(color: number[]) {
-        renderer.setWireframeLineColor(color);
+        styleService.setWireframeLineColor(color);
     }
 
     setWireframeLineWidth(width: number) {
-        renderer.setWireframeLineWidth(width);
+        styleService.setWireframeLineWidth(width);
     }
 
     setDirectionalLightColor(color: number[]) {
-        renderer.setDirectionalLight({ color });
+        styleService.setDirectionalLight({ color });
     }
 
     setDirectionalLightDiretion(direction: number[]) {
-        renderer.setDirectionalLight({ direction });
+        styleService.setDirectionalLight({ direction });
     }
 }

@@ -5,25 +5,19 @@
 import * as regl from 'regl';
 import { inject, injectable } from 'inversify';
 import { EventEmitter } from 'eventemitter3';
+import { mat4, vec3 } from 'gl-matrix';
 import { SERVICE_IDENTIFIER, BRDFLUT_PATH } from '@/services/constants';
 import { ISceneService } from '@/services/SceneService';
 import { ICameraService } from '@/services/Camera';
 import { IAttributeData } from '@/services/GltfService';
-// @ts-ignore
-import vert from '@/shaders/pbr-vert.glsl';
-// @ts-ignore
-import frag from '@/shaders/pbr-frag.glsl';
-// @ts-ignore
-import gridVert from '@/shaders/grid-vert.glsl';
-// @ts-ignore
-import gridFrag from '@/shaders/grid-frag.glsl';
-// @ts-ignore
-import shadowVert from '@/shaders/shadow-vert.glsl';
-// @ts-ignore
-import shadowFrag from '@/shaders/shadow-frag.glsl';
+import { compileBuiltinModules } from '@/shaders';
+import { getModule } from '@/shaders/shader-module';
 import { loadImage } from '@/utils/asset';
-import { GLTF_COMPONENT_TYPE_ARRAYS, GLTF_ELEMENTS_PER_TYPE } from 'gltf-loader-ts/lib/gltf-loader';
-import { mat4, vec3 } from 'gl-matrix';
+import { generateBarycentric } from '@/utils/geometry';
+import { IStyleService } from './Style';
+import { IPostProcessorService, IPass } from './PostProcessor';
+import { IWebGLContextService } from './Regl';
+import { container } from '@/inversify.config';
 
 const SHADOW_RES = 2048;
 
@@ -35,26 +29,13 @@ interface drawParams {
     cullFace: boolean;
 }
 
-interface DirectionalLight {
-    direction: number[];
-    color: number[];
-}
-
 export interface IRendererService {
     on(name: string, cb: Function): void;
     init(container: string): void;
     render(): void;
     getCanvas(): HTMLCanvasElement;
-    getRegl(): regl.Regl;
     createDrawCommand(params: drawParams): regl.DrawCommand;
     createDrawDepthCommand(params: Partial<drawParams>): regl.DrawCommand;
-    isSupportSRGB(): boolean;
-
-    setSplitLayer(splitLayer: number[]): void;
-    setFinalSplit(finalSplit: number[]): void;
-    setWireframeLineColor(color: number[]): void;
-    setWireframeLineWidth(width: number): void;
-    setDirectionalLight(light: Partial<DirectionalLight>): void;
 }
 
 @injectable()
@@ -63,20 +44,8 @@ export class Renderer extends EventEmitter implements IRendererService {
     static FRAME_EVENT = 'frame';
     static RESIZE_EVENT = 'resize';
 
-    private _regl: regl.Regl;
     private canvas: HTMLCanvasElement;
-
-    /**
-     * style variables
-     */
-    private splitLayer: number[] = [0, 0, 0, 0];
-    private finalSplit: number[] = [0, 0, 0, 0];
-    private wireframeLineColor: number[] = [0, 0, 0];
-    private wireframeLineWidth: number = 1;
-    private directionalLight: DirectionalLight = {
-        direction: [0, 0.5, 0.5],
-        color: [1, 1, 1]
-    };
+    private _regl: regl.Regl;
 
     private defines: {[key: string]: number} = {
         USE_IBL: 1,
@@ -94,19 +63,17 @@ export class Renderer extends EventEmitter implements IRendererService {
      */
     private sceneUniforms: {[key: string]: any} = {};
     private drawGround: regl.DrawCommand;
-    private fbo: regl.Framebuffer2D;
-
-    /**
-     * WebGL extension flags
-     */
-    private supportSRGB: boolean = false;
-    private supportTextureLod: boolean = false;
-    private supportDerivatives: boolean = false;
+    private drawSkybox: regl.DrawCommand;
+    private renderToPostProcessor: regl.DrawCommand;
+    private depthFBO: regl.Framebuffer2D;
 
     private inited: boolean = false;
 
+    @inject(SERVICE_IDENTIFIER.WebGLContextService) private _context: IWebGLContextService;
     @inject(SERVICE_IDENTIFIER.SceneService) private _scene: ISceneService;
     @inject(SERVICE_IDENTIFIER.CameraService) private _camera: ICameraService;
+    @inject(SERVICE_IDENTIFIER.StyleService) private _style: IStyleService;
+    @inject(SERVICE_IDENTIFIER.PostProcessorService) private _postProcessor: IPostProcessorService;
 
     private prefixDefines(glsl: string, defines: any): string {
         const d = { ...this.defines, ...defines };
@@ -119,78 +86,18 @@ export class Renderer extends EventEmitter implements IRendererService {
     }
 
     /**
-     * generate barycentric coordinates
-     * @see https://xiaoiver.github.io/coding/2018/10/22/Wireframe-%E7%9A%84%E5%AE%9E%E7%8E%B0.html
-     */
-    private generateBarycentric(attributes: {
-        [key: string]: IAttributeData;
-    }, indices: IAttributeData) {
-        const uniqueAttributes: {
-            [key: string]: {
-                buffer: Uint8Array|Uint16Array|Float32Array;
-            };
-        } = {};
-        const indiceNum = indices.buffer.length;
-
-        // create empty typed array according to indices' num
-        Object.keys(attributes).forEach(attributeName => {
-            const { componentType, attributeType } = attributes[attributeName];
-            const size = GLTF_ELEMENTS_PER_TYPE[attributeType];
-            const bufferConstructor = GLTF_COMPONENT_TYPE_ARRAYS[componentType];
-            uniqueAttributes[attributeName] = {
-                buffer: new bufferConstructor(size * indiceNum)
-            };
-        });
-        
-        // reallocate attribute data
-        let cursor = 0;
-        const bufferConstructor = GLTF_COMPONENT_TYPE_ARRAYS[indices.componentType];
-        const uniqueIndices = new bufferConstructor(indiceNum);
-        for (var i = 0; i < indiceNum; i++) {
-            var ii = indices.buffer[i];
-
-            Object.keys(attributes).forEach(name => {
-                const { buffer, attributeType } = attributes[name];
-                const size = GLTF_ELEMENTS_PER_TYPE[attributeType || 'VEC3'];
-                for (var k = 0; k < size; k++) {
-                    uniqueAttributes[name].buffer[cursor * size + k] = buffer[ii * size + k];
-                }
-            });
-            uniqueIndices[i] = cursor;
-            cursor++;
-        }
-
-        // create barycentric attributes
-        const barycentricBuffer = new Float32Array(indiceNum * 3);
-        for (let i = 0; i < indiceNum;) {
-            for (let j = 0; j < 3; j++) {
-                const ii = uniqueIndices[i++];
-                barycentricBuffer[ii * 3 + j] = 1;
-            }
-        }
-        uniqueAttributes['a_Barycentric'] = {
-            buffer: barycentricBuffer
-        };
-
-        return {
-            uniqueAttributes,
-            uniqueIndices
-        }
-    }
-
-    /**
      * every scene node can use this method to create its own draw command
      */
     public createDrawCommand({ attributes, uniforms, defines, indices, cullFace }: drawParams) {
-        const { uniqueAttributes, uniqueIndices } = this.generateBarycentric(attributes, indices);
-
+        const { uniqueAttributes, uniqueIndices } = generateBarycentric(attributes, indices);
+        const { vs, fs } = getModule('render-pass');
         return this._regl({
-            vert: this.prefixDefines(vert, defines),
-            frag: this.prefixDefines(frag, defines),
+            vert: this.prefixDefines(vs, defines),
+            frag: this.prefixDefines(fs, defines),
             attributes: uniqueAttributes,
             uniforms: {
-                u_LightDirection: () => this.directionalLight.direction,
-                u_LightColor: () => this.directionalLight.color,
+                u_LightDirection: () => this._style.getDirectionalLight().direction,
+                u_LightColor: () => this._style.getDirectionalLight().color,
                 u_Camera: () => this._camera.eye,
                 // @ts-ignore
                 u_ModelMatrix: this._regl.prop('modelMatrix'),
@@ -198,11 +105,11 @@ export class Renderer extends EventEmitter implements IRendererService {
                 u_NormalMatrix: this._regl.prop('normalMatrix'),
                 // @ts-ignore
                 u_MVPMatrix: this._regl.prop('mvpMatrix'),
-                u_ScaleDiffBaseMR: () => this.splitLayer,
-                u_FinalSplit: () => this.finalSplit,
+                u_ScaleDiffBaseMR: () => this._style.getSplitLayer(),
+                u_FinalSplit: () => this._style.getFinalSplit(),
                 u_ScaleIBLAmbient: [1, 1, 0, 0],
-                u_WireframeLineColor: () => this.wireframeLineColor,
-                u_WireframeLineWidth: () => this.wireframeLineWidth,
+                u_WireframeLineColor: () => this._style.getWireframeLineColor(),
+                u_WireframeLineWidth: () => this._style.getWireframeLineWidth(),
                 u_ViewportWidth: this._regl.context('viewportWidth'),
                 u_ViewportHeight: this._regl.context('viewportHeight'),
                 ...uniforms,
@@ -221,9 +128,10 @@ export class Renderer extends EventEmitter implements IRendererService {
     }
 
     public createDrawDepthCommand({ attributes, indices }: drawParams) {
+        const { vs, fs } = getModule('shadow-pass');
         return this._regl({
-            vert: shadowVert,
-            frag: shadowFrag,
+            vert: vs,
+            frag: fs,
             attributes: {
                 a_Position: attributes['a_Position'].buffer
             },
@@ -232,7 +140,7 @@ export class Renderer extends EventEmitter implements IRendererService {
                 u_MVPMatrixFromLight: (_, props) => {
                     const vm = mat4.create();
                     const projectionMatrix = mat4.create();
-                    mat4.lookAt(vm, this.directionalLight.direction, this._camera.center, this._camera.up);
+                    mat4.lookAt(vm, this._style.getDirectionalLight().direction, this._camera.center, this._camera.up);
 
                     mat4.ortho(projectionMatrix, -25, 25, -20, 20, -25, 25);
                     mat4.mul(projectionMatrix, projectionMatrix, vm);
@@ -244,7 +152,7 @@ export class Renderer extends EventEmitter implements IRendererService {
                 primitive: 'triangles',
                 data: <Uint8Array|Uint16Array|Uint32Array>indices.buffer
             }),
-            framebuffer: this.fbo
+            framebuffer: this.depthFBO
         });
     }
 
@@ -252,9 +160,10 @@ export class Renderer extends EventEmitter implements IRendererService {
      * draw a plane mesh with grid
      */
     private createDrawGroundCommand() {
+        const { vs, fs, uniforms } = getModule('grid');
         this.drawGround = this._regl({
-            vert: gridVert,
-            frag: gridFrag,
+            vert: vs,
+            frag: fs,
             attributes: {
                 a_Position: [
                     [-4, -1, -4],
@@ -270,82 +179,106 @@ export class Renderer extends EventEmitter implements IRendererService {
                 ]
             },
             uniforms: {
+                ...uniforms,
                 u_MVPMatrix: () => this._camera.transform,
                 u_MVPMatrixFromLight: () => {
                     const vm = mat4.create();
                     const projectionMatrix = mat4.create();
-                    mat4.lookAt(vm, this.directionalLight.direction, this._camera.center, this._camera.up);
+                    mat4.lookAt(vm, this._style.getDirectionalLight().direction, this._camera.center, this._camera.up);
 
                     mat4.ortho(projectionMatrix, -25, 25, -20, 20, -25, 25);
                     mat4.mul(projectionMatrix, projectionMatrix, vm);
                     return mat4.mul(projectionMatrix, projectionMatrix, mat4.create());
                 },
-                u_GridSize: 5,
-                u_GridSize2: 1,
-                u_GridColor: [0, 0, 0, 1],
-                u_GridColor2: [0.3, 0.3, 0.3, 1],
-                u_GridEnabled: true,
-                u_ShadowMap: () => this.fbo,
+                u_ShadowMap: () => this.depthFBO,
                 u_Camera: () => this._camera.eye,
-                u_LightColor: () => this.directionalLight.color,
-                u_LightDirection: () => this.directionalLight.direction
+                u_LightColor: () => this._style.getDirectionalLight().color,
+                u_LightDirection: () => this._style.getDirectionalLight().direction,
             },
             elements: [
-                [0, 2, 3],
-                [2, 0, 1]
-            ]
+                [0, 3, 2],
+                [2, 1, 0]
+            ],
+            cull: {
+                enable: true
+            }
+        });
+    }
+
+    private createDrawSkyboxCommand() {
+        const { vs, fs, uniforms } = getModule('skybox');
+        this.drawSkybox = this._regl({
+            vert: vs,
+            frag: fs,
+            attributes: {
+                a_Position: [
+                    [1.0, 1.0, 1.0],  [-1.0, 1.0, 1.0],  [-1.0,-1.0, 1.0],   [1.0,-1.0, 1.0], // v0-v1-v2-v3 front
+                    [1.0, 1.0, 1.0],   [1.0,-1.0, 1.0],   [1.0,-1.0,-1.0],   [1.0, 1.0,-1.0], // v0-v3-v4-v5 right
+                    [1.0, 1.0, 1.0],   [1.0, 1.0,-1.0],  [-1.0, 1.0,-1.0],  [-1.0, 1.0, 1.0], // v0-v5-v6-v1 up
+                   [-1.0, 1.0, 1.0],  [-1.0, 1.0,-1.0],  [-1.0,-1.0,-1.0],  [-1.0,-1.0, 1.0], // v1-v6-v7-v2 left
+                   [-1.0,-1.0,-1.0],   [1.0,-1.0,-1.0],   [1.0,-1.0, 1.0],  [-1.0,-1.0, 1.0], // v7-v4-v3-v2 down
+                    [1.0,-1.0,-1.0],  [-1.0,-1.0,-1.0],  [-1.0, 1.0,-1.0],   [1.0, 1.0,-1.0]  // v4-v7-v6-v5 back
+                ],
+            },
+            uniforms: {
+                ...uniforms,
+                u_VPMatrix: () => {
+                    // remove translation in original view matrix
+                    const vm = this._camera.view;
+                    const viewMatrix = mat4.create();
+                    mat4.set(viewMatrix, vm[0], vm[1], vm[2], 0,
+                        vm[4], vm[5], vm[6], 0,
+                        vm[8], vm[9], vm[10], 0,
+                        0, 0, 0, 1);
+                    const vpMatrix = mat4.create();
+                    mat4.mul(vpMatrix, this._camera.projection, viewMatrix);
+                    return vpMatrix;
+                },
+                u_Skybox: this.sceneUniforms['u_SpecularEnvSampler']
+            },
+            elements: [
+                [0, 1, 2],   [0, 2, 3],    // front
+                [4, 5, 6],   [4, 6, 7],    // right
+                [8, 9,10],   [8,10,11],    // up
+                [12,13,14],  [12,14,15],    // left
+                [16,17,18],  [16,18,19],    // down
+                [20,21,22],  [20,22,23]     // back
+            ],
+            cull: {
+                enable: false
+            },
+            depth: {
+                // put skybox to the bottom
+                mask: false
+            }
         });
     }
 
     private async createRegl($container: HTMLElement) {
-        this._regl = await new Promise((resolve, reject) => {
-            regl({
-                container: $container,
-                extensions: [
-                    'EXT_shader_texture_lod', // IBL
-                    'OES_standard_derivatives', // wireframe
-                    'EXT_SRGB', // baseColor emmisive
-                    'OES_texture_float' // shadow map
-                ],
-                // profile: true,
-                onDone: (err, _regl) => {
-                    if (err || !_regl) {
-                        console.log(err);
-                        reject(err);
-                        return;
-                    }
-                    resolve(_regl);
+        await this._context.init($container);
+        this._regl = this._context.getContext();
 
-                    this.canvas = $container.getElementsByTagName('canvas')[0];
-                    this.emit(Renderer.READY_EVENT);
-                }
-            });
-        });
+        this.canvas = $container.getElementsByTagName('canvas')[0];
+        this.emit(Renderer.READY_EVENT);
 
-        if (this._regl.hasExtension('EXT_SRGB')) {
-            this.supportSRGB = true;
-        } else {
+        if (!this._context.isSupportSRGB()) {
             /**
              * if EXT_SRGB is not supported, we must converted to linear space in fragment shader manually.
              * if supported, baseColorTexture, emissiveTexture & brdfLUT must use 'srgb' in regl.
              */
             this.defines['MANUAL_SRGB'] = 1;
         }
-        if (this._regl.hasExtension('EXT_shader_texture_lod')) {
-            this.supportTextureLod = true;
+        if (this._context.isSupportTextureLod()) {
             this.defines['USE_TEX_LOD'] = 1;
-        }
-        if (this._regl.hasExtension('OES_standard_derivatives')) {
-            this.supportDerivatives = true;
         }
 
         // create a fbo for shadow map
-        this.fbo = this._regl.framebuffer({
+        this.depthFBO = this._regl.framebuffer({
             color: this._regl.texture({
                 width: SHADOW_RES,
                 height: SHADOW_RES,
-                wrap: 'clamp',
-                type: 'float'
+                format: 'rgba',
+                type: 'uint8'
             }),
             depth: true
         });
@@ -366,6 +299,9 @@ export class Renderer extends EventEmitter implements IRendererService {
             // create a fullscreen canvas
             await this.createRegl($container);
 
+            // compile shader modules
+            compileBuiltinModules();
+
             this.updateCamera();
             window.addEventListener('resize', () => {
                 this.updateCamera();
@@ -383,22 +319,6 @@ export class Renderer extends EventEmitter implements IRendererService {
         return this.canvas;
     }
 
-    public getRegl() {
-        return this._regl;
-    }
-
-    public isSupportSRGB() {
-        return this.supportSRGB;
-    }
-
-    public isSupportTextureLod() {
-        return this.supportTextureLod;
-    }
-
-    public isSupportDerivatives() {
-        return this.supportDerivatives;
-    }
-
     private async loadBrdfLUT() {
         const image = await loadImage(BRDFLUT_PATH);
         this.sceneUniforms['u_brdfLUT'] = this._regl.texture({
@@ -407,7 +327,7 @@ export class Renderer extends EventEmitter implements IRendererService {
             mag: 'linear',
             wrapS: 'clamp',
             wrapT: 'clamp',
-            format: this.isSupportSRGB() ? 'srgb' : 'rgba'
+            format: this._context.isSupportSRGB() ? 'srgb' : 'rgba'
         });
     }
 
@@ -442,30 +362,10 @@ export class Renderer extends EventEmitter implements IRendererService {
             wrapT: 'clamp',
             min: mipLevels === 1 ? 'linear' : 'linear mipmap linear',
             mag: 'linear',
-            format: this.isSupportSRGB() ? 'srgb' : 'rgba'
+            format: this._context.isSupportSRGB() ? 'srgb' : 'rgba'
         });
 
         this.sceneUniforms[uniformName] = cubeMap;
-    }
-
-    setFinalSplit(finalSplit: number[]) {
-        this.finalSplit = finalSplit;
-    }
-
-    setSplitLayer(splitLayer: number[]) {
-        this.splitLayer = splitLayer;
-    }
-
-    setWireframeLineColor(color: number[]) {
-        this.wireframeLineColor = color;
-    }
-
-    setWireframeLineWidth(width: number) {
-        this.wireframeLineWidth = width;
-    }
-
-    setDirectionalLight(light: Partial<DirectionalLight>) {
-        this.directionalLight = { ...this.directionalLight, ...light };
     }
 
     public async render() {
@@ -474,26 +374,56 @@ export class Renderer extends EventEmitter implements IRendererService {
             await this.loadBrdfLUT();
             await this.loadEnvironment('papermill', 'diffuse', 'u_DiffuseEnvSampler', 1);
             await this.loadEnvironment('papermill', 'specular', 'u_SpecularEnvSampler', 10);
+
+            this._postProcessor.init();
+            // this._postProcessor.add(container.get<IPass>(SERVICE_IDENTIFIER.BlurHPass));
+            // this._postProcessor.add(container.get<IPass>(SERVICE_IDENTIFIER.BlurVPass));
+            this._postProcessor.add(container.get<IPass>(SERVICE_IDENTIFIER.CopyPass));
+
+            this.renderToPostProcessor = this._regl({
+                cull: {
+                    enable: true
+                },
+                // since post-processor will swap read/write fbos, we must retrieve it dynamically
+                framebuffer: () => this._postProcessor.getReadFBO()
+            });
         }
 
         // rebuild scene graph
         await this._scene.init();
 
         if (!this.inited) {
+            // create draw ground & skybox command for later use
             this.createDrawGroundCommand();
-            this._regl.frame(() => {
+            this.createDrawSkyboxCommand();
+            this._regl.frame(({ viewportWidth, viewportHeight }) => {
+
                 this._regl.clear({
-                    color: [0.2, 0.2, 0.2, 1],
+                    color: [1, 1, 1, 1],
                     depth: 1,
-                    framebuffer: this.fbo
+                    framebuffer: this.depthFBO
                 });
 
                 // shadow map pass
                 this._scene.drawDepth();
 
-                // lighting pass
-                this.drawGround();                
-                this._scene.draw();
+                this._postProcessor.resize(viewportWidth, viewportHeight);
+
+                this.renderToPostProcessor({}, () => {
+                    this._regl.clear({
+                        color: [1, 1, 1, 1],
+                        depth: 1,
+                        framebuffer: this._postProcessor.getReadFBO()
+                    });
+
+                    // lighting pass
+                    this.drawSkybox();
+                    this.drawGround();
+                    this._scene.draw();
+                });
+
+                // post-processing pass
+                this._postProcessor.render();
 
                 this.emit(Renderer.FRAME_EVENT);
             });

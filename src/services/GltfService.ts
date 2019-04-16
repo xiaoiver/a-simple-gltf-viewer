@@ -111,14 +111,15 @@ export class GltfService implements IGltfService {
         }
         const buffer = gltf.buffers[index];
         // If present, GLB container is required to be the first buffer.
-        // if (buffer.uri === undefined) {
-        //     /* istanbul ignore next */
-        //     if (index !== 0) { throw new Error('GLB container is required to be the first buffer'); }
-        //     if (this.asset.glbData === undefined) {
-        //         throw new Error('invalid gltf: buffer has no uri nor is there a GLB buffer');
-        //     }
-        //     return this.asset.glbData.binaryChunk;
-        // }
+        // @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#glb-stored-buffer
+        if (buffer.uri === undefined) {
+            /* istanbul ignore next */
+            if (index !== 0) { throw new Error('GLB container is required to be the first buffer'); }
+            if (this.asset.glbData === undefined) {
+                throw new Error('invalid gltf: buffer has no uri nor is there a GLB buffer');
+            }
+            return this.asset.glbData.binaryChunk;
+        }
 
         const url = resolveURL(buffer.uri || '', this.asset.bufferData.baseUri);
         const bufferData: ArrayBuffer = await this.asset.bufferData.loader.load(url);

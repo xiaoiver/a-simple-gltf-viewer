@@ -9,7 +9,6 @@ import { notification, Button, Spin, message } from 'antd';
 import Layers from './Layers';
 import registerServiceWorker from './registerServiceWorker';
 
-// Import the styles here to process them with webpack
 import '@public/style.css';
 
 class App extends React.Component<{}, {

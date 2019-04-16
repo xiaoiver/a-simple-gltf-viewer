@@ -2,11 +2,11 @@ attribute vec3 a_Position;
 attribute vec3 a_Normal;
 
 varying vec3 v_Position;
-varying vec4 v_PositionFromLight;
 varying vec3 v_Normal;
 
 uniform mat4 u_MVPMatrix;
-uniform mat4 u_MVPMatrixFromLight;
+
+#pragma include "shadow"
 
 void main() {
     v_Position = a_Position;
