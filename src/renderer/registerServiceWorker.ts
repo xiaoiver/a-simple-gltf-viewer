@@ -1,5 +1,7 @@
 import { register } from 'register-service-worker';
 
+const BASE_URL = '/a-simple-gltf-viewer';
+
 // polyfill the CustomEvent in ie9/10/11
 // https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent/CustomEvent#Polyfill
 (function () {
@@ -30,7 +32,7 @@ function dispatchServiceWorkerEvent(eventName: string, eventData: any) {
 }
 
 export default function () {
-    register('/service-worker.js', {
+    register(`${BASE_URL}/service-worker.js`, {
         updated(registration) {
             dispatchServiceWorkerEvent('sw.updated', registration);
         },

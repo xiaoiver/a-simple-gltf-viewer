@@ -34,6 +34,8 @@ import quadVert from './post-processing/quad.vert.glsl';
 import copyPassFrag from './post-processing/copy.frag.glsl';
 // @ts-ignore
 import blurPassFrag from './post-processing/blur.frag.glsl';
+// @ts-ignore
+import dofPassFrag from './post-processing/dof.frag.glsl';
 
 
 import { registerModule } from './shader-module';
@@ -54,4 +56,5 @@ export function compileBuiltinModules() {
     // post-processing
     registerModule('copy-pass', { vs: quadVert, fs: copyPassFrag });
     registerModule('blur-pass', { vs: quadVert, fs: blurPassFrag });
+    registerModule('dof-pass', { vs: quadVert, fs: dofPassFrag });
 }

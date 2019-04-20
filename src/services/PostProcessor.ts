@@ -59,7 +59,7 @@ export class PostProcessor implements IPostProcessorService {
                 height: 1,
                 wrap: 'clamp'
             }),
-            depth: true
+            // depth: true
         });
         this.writeFBO = _regl.framebuffer({
             color: _regl.texture({
@@ -67,7 +67,7 @@ export class PostProcessor implements IPostProcessorService {
                 height: 1,
                 wrap: 'clamp'
             }),
-            depth: true
+            // depth: true
         });
 
         this.screenRenderTarget = _regl({

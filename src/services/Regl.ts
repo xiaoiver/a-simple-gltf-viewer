@@ -45,7 +45,8 @@ export class ReglContext implements IWebGLContextService {
                     'EXT_shader_texture_lod', // IBL
                     'OES_standard_derivatives', // wireframe
                     'EXT_SRGB', // baseColor emmisive
-                    'OES_texture_float' // shadow map
+                    'OES_texture_float', // shadow map
+                    'WEBGL_depth_texture'
                 ],
                 // profile: true,
                 onDone: (err, _regl) => {

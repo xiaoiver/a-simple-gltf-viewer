@@ -6,15 +6,21 @@ import { SERVICE_IDENTIFIER, WRAP_T, WRAP_S, MAG_FILTER, MIN_FILTER } from '@/se
 import { ICameraService } from '@/services/Camera';
 import { IGltfService, IAttributeData } from '@/services/GltfService';
 import { IRendererService } from '@/services/Renderer';
-import { mat4 } from 'gl-matrix';
+import { mat4, quat } from 'gl-matrix';
 import { Mesh, MaterialPbrMetallicRoughness, MaterialNormalTextureInfo, TextureInfo, MaterialOcclusionTextureInfo, Sampler } from 'gltf-loader-ts/lib/gltf';
 import { inject, injectable } from 'inversify';
 import { IWebGLContextService } from './Regl';
+import { NodeAnimationChannel } from './SceneService';
+import { KeyFrame, chunkArray, Interpolation, InterpolationPath } from '@/utils/animation';
+import { GLTF_ELEMENTS_PER_TYPE } from 'gltf-loader-ts';
+import { ITimelineService } from './Timeline';
+
 
 export interface ISceneNodeService {
     setId(id: number): void;
     setMatrix(matrix: mat4): void;
     setMesh(mesh: Mesh): Promise<void>;
+    setAnimations(animations: NodeAnimationChannel[]): Promise<void>;
     addChild(node: ISceneNodeService): void;
     buildDrawCommand(): void;
     draw(parentTransform: mat4): void;
@@ -41,6 +47,8 @@ export class SceneNode implements ISceneNodeService {
     private id: number;
     private matrix: mat4;
     private mesh: Mesh;
+    private animations: NodeAnimationChannel[];
+    private keyframes: KeyFrame[];
     private children: ISceneNodeService[] = [];
     private drawCommand: regl.DrawCommand;
     private drawDepthCommand: regl.DrawCommand;
@@ -56,9 +64,27 @@ export class SceneNode implements ISceneNodeService {
     @inject(SERVICE_IDENTIFIER.GltfService) private _gltf: IGltfService;
     @inject(SERVICE_IDENTIFIER.RendererService) private _renderer: IRendererService;
     @inject(SERVICE_IDENTIFIER.CameraService) private _camera: ICameraService;
+    @inject(SERVICE_IDENTIFIER.TimelineService) private _timeline: ITimelineService;
 
     public setId(id: number): void {
         this.id = id;
+    }
+
+    public async setAnimations(animations: NodeAnimationChannel[]) {
+        this.animations = animations;
+        this.keyframes = await Promise.all(this.animations.map(async animation => {
+            // @see https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#animation-sampler
+            const { input, output, interpolation } = animation.sampler;
+            const { buffer: timeline, attributeType: timelineAttributeType } = await this._gltf.getData(input);
+            const { buffer: values, attributeType: valueAttributeType } = await this._gltf.getData(output);
+
+            return new KeyFrame({
+                path: animation.target.path,
+                interpolation: <Interpolation>interpolation,
+                timeline: <ArrayLike<number>>chunkArray(timeline, GLTF_ELEMENTS_PER_TYPE[timelineAttributeType]),
+                values: <number[][]>chunkArray(values, GLTF_ELEMENTS_PER_TYPE[valueAttributeType]),
+            });
+        }));
     }
     
     public setMatrix(matrix: mat4): void {
@@ -288,12 +314,44 @@ export class SceneNode implements ISceneNodeService {
         });
         this.textures = [];
         this.uniforms = {};
+        this.keyframes = [];
+    }
+
+    private applyKeyFrameAnimations() {
+        const modelMatrix = mat4.create();
+        const trsMatrix = mat4.create();
+        const elapsedSec = this._timeline.elapsedSec();
+        if (this.keyframes && this.keyframes.length) {
+            this.keyframes.forEach(keyframe => {
+                this._timeline.setDuration(keyframe.duration);
+                if (keyframe.path === InterpolationPath.ROTATION) {
+                    mat4.fromQuat(trsMatrix, keyframe.interpolate(elapsedSec));
+                    mat4.mul(modelMatrix, trsMatrix, modelMatrix);
+                } else if (keyframe.path === InterpolationPath.TRANSLATION) {
+                    mat4.fromTranslation(trsMatrix, keyframe.interpolate(elapsedSec));
+                    mat4.mul(modelMatrix, trsMatrix, modelMatrix);
+                } else if (keyframe.path === InterpolationPath.SCALE) {
+                    mat4.fromScaling(trsMatrix, keyframe.interpolate(elapsedSec));
+                    mat4.mul(modelMatrix, trsMatrix, modelMatrix);
+                }
+                // TODO: weights
+            });
+        }
+        return modelMatrix;
+    }
+
+    private caculateModelMatrix(parentTransform: mat4) {
+        const animationMatrix = this.applyKeyFrameAnimations();
+
+        const modelMatrix = mat4.create();
+        mat4.multiply(modelMatrix, this.matrix, parentTransform);
+        mat4.multiply(modelMatrix, animationMatrix, modelMatrix);
+
+        return modelMatrix;
     }
 
     public draw(parentTransform: mat4): void {
-        const modelMatrix = mat4.create();
-        mat4.multiply(modelMatrix, this.matrix, parentTransform);
-
+        const modelMatrix = this.caculateModelMatrix(parentTransform);
         const modelInverse = mat4.create();
         const normalMatrix = mat4.create();
 
@@ -317,8 +375,7 @@ export class SceneNode implements ISceneNodeService {
     }
 
     public drawDepth(parentTransform: mat4): void {
-        const modelMatrix = mat4.create();
-        mat4.multiply(modelMatrix, this.matrix, parentTransform);
+        const modelMatrix = this.caculateModelMatrix(parentTransform);
         if (this.mesh) {
             this.drawDepthCommand({
                 modelMatrix

@@ -11,11 +11,13 @@ import { IStatsService } from '@/services/Stats';
 import { vec3 } from 'gl-matrix';
 import { IStyleService } from './services/Style';
 import { IPostProcessorService } from './services/PostProcessor';
+import { ITimelineService } from './services/Timeline';
 
 const gltfService = container.get<IGltfService>(SERVICE_IDENTIFIER.GltfService);
 const renderer = container.get<IRendererService>(SERVICE_IDENTIFIER.RendererService);
 const cameraService = container.get<ICameraService>(SERVICE_IDENTIFIER.CameraService);
 const styleService = container.get<IStyleService>(SERVICE_IDENTIFIER.StyleService);
+const timelineService = container.get<ITimelineService>(SERVICE_IDENTIFIER.TimelineService);
 container.get<IPostProcessorService>(SERVICE_IDENTIFIER.PostProcessorService);
 container.get<IMouseService>(SERVICE_IDENTIFIER.MouseService);
 container.get<IStatsService>(SERVICE_IDENTIFIER.StatsService);
@@ -29,7 +31,8 @@ interface GltfViewerOptions {
         near: number;
         far: number;
     };
-    onResize?(size : { width: number; height: number }): void;
+    onResize?(size : { width: number; height: number; }): void;
+    onFrame?(data: { duration: number; time: number; }): void;
 }
 
 const defaultCamera = {
@@ -43,7 +46,7 @@ const defaultCamera = {
 export class GltfViewer {
     private container: string = 'viewer-container';
 
-    constructor({ container, camera = defaultCamera, onResize }: GltfViewerOptions) {
+    constructor({ container, camera = defaultCamera, onResize, onFrame }: GltfViewerOptions) {
         const { eye, center, fovy, near, far } = camera;
         this.container = container;
 
@@ -52,6 +55,15 @@ export class GltfViewer {
             const { width, height } = params[0];
             if (onResize) {
                 onResize({ width, height });
+            }
+        });
+
+        renderer.on(Renderer.FRAME_EVENT, () => {
+            if (onFrame) {
+                onFrame({
+                    time: timelineService.elapsedSec(),
+                    duration: timelineService.getDuration()
+                });
             }
         });
     }
@@ -112,5 +124,13 @@ export class GltfViewer {
 
     setDirectionalLightDiretion(direction: number[]) {
         styleService.setDirectionalLight({ direction });
+    }
+
+    pauseTimeline(value?: number) {
+        timelineService.pause(value);
+    }
+
+    startTimeline() {
+        timelineService.unpause();
     }
 }

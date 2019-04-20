@@ -11,10 +11,12 @@ const SERVICE_IDENTIFIER = {
     StyleService: Symbol.for('StyleService'),
     PostProcessorService: Symbol.for('PostProcessorService'),
     WebGLContextService: Symbol.for('WebGLContextService'),
+    TimelineService: Symbol.for('TimelineService'),
 
     BlurHPass: Symbol.for('BlurHPass'),
     BlurVPass: Symbol.for('BlurVPass'),
     CopyPass: Symbol.for('CopyPass'),
+    DoFPass: Symbol.for('DoFPass'),
 };
 
 const BRDFLUT_PATH = 'textures/brdfLUT.png';

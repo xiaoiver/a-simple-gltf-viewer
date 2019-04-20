@@ -66,7 +66,7 @@ export class Mouse extends EventEmitter implements IMouseService {
             
             this.camera.roll(deltaX * 0.001 * moveSpeed);
             this.camera.pitch(deltaY * 0.001 * moveSpeed);
-            this.camera.dolly(deltaZ * 0.05 * moveSpeed);
+            this.camera.dolly(deltaZ * 0.001 * moveSpeed);
         })
     }
 

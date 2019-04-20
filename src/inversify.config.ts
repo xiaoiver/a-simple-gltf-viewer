@@ -11,6 +11,7 @@ import { IMouseService, Mouse } from '@/services/Mouse';
 import { StatsService, IStatsService } from '@/services/Stats';
 import { ISceneNodeService, SceneNode } from '@/services/Node';
 import { IStyleService, Style } from '@/services/Style';
+import { ITimelineService, Timeline } from '@/services/Timeline';
 import { IPostProcessorService, PostProcessor, IPass } from '@/services/PostProcessor';
 import { EventEmitter } from 'eventemitter3';
 import { Container, decorate, injectable } from 'inversify';
@@ -18,6 +19,7 @@ import { IWebGLContextService, ReglContext } from '@/services/Regl';
 import { BlurV } from '@/services/post-processing/BlurV';
 import { BlurH } from '@/services/post-processing/BlurH';
 import { Copy } from '@/services/post-processing/Copy';
+import { DoF } from './services/post-processing/DoFPass';
 
 const container: Container = new Container();
 
@@ -39,6 +41,8 @@ container.bind<IStatsService>(SERVICE_IDENTIFIER.StatsService)
     .to(StatsService).inSingletonScope();
 container.bind<IStyleService>(SERVICE_IDENTIFIER.StyleService)
     .to(Style).inSingletonScope();
+container.bind<ITimelineService>(SERVICE_IDENTIFIER.TimelineService)
+    .to(Timeline).inSingletonScope();
 
 container.bind<IPostProcessorService>(SERVICE_IDENTIFIER.PostProcessorService)
     .to(PostProcessor).inSingletonScope();
@@ -48,6 +52,9 @@ container.bind<IPass>(SERVICE_IDENTIFIER.BlurVPass)
     .to(BlurV);
 container.bind<IPass>(SERVICE_IDENTIFIER.CopyPass)
     .to(Copy);
+container.bind<IPass>(SERVICE_IDENTIFIER.DoFPass)
+    .to(DoF);
+
 
 decorate(injectable(), EventEmitter);
 

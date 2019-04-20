@@ -5,21 +5,26 @@ import { GltfViewer } from '@/index';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import * as dat from 'dat.gui';
-import { notification, Button, Spin, message } from 'antd';
+import { notification, Button, Spin, Slider, message } from 'antd';
 import Layers from './Layers';
 import registerServiceWorker from './registerServiceWorker';
 
 import '@public/style.css';
+import Timeline from './Timeline';
 
 class App extends React.Component<{}, {
     loading: boolean;
     showLayers: boolean;
     size: { width: number; height: number };
+    timelinePaused: boolean;
+    timelineValue: number;
 }> {
     public readonly state = {
         loading: false,
         showLayers: false,
-        size: { width: 1, height: 1 }
+        size: { width: 1, height: 1 },
+        timelinePaused: false,
+        timelineValue: 0
     };
 
     private viewer: GltfViewer;
@@ -29,19 +34,20 @@ class App extends React.Component<{}, {
 
         this.viewer = new GltfViewer({
             container: 'viewer-container',
-            onResize: this.handleResize
+            onResize: this.handleResize,
+            onFrame: this.handleFrame
         });
         this.viewer.init();
 
         const gui = new dat.GUI();
         const folder = gui.addFolder('glTF viewer');
 
-        const models = ['Triangle', 'Box', 'BoxTextured', 'DamagedHelmet', 'Corset',
+        const models = ['AnimatedCube', 'Box', 'BoxTextured', 'DamagedHelmet', 'Avocado',
             'MetalRoughSpheres'
         ];
         const layers = ['layers', 'final', 'albedo', 'normal', 'metallic', 'roughness', 'wireframe'];
 
-        const text = { Model: 'DamagedHelmet', Layer: 'layers' };
+        const text = { Model: 'AnimatedCube', Layer: 'layers' };
         folder.add(text, 'Model', models).onChange(this.loadModel);
         folder.add(text, 'Layer', layers).onChange(this.showLayer);
 
@@ -60,7 +66,7 @@ class App extends React.Component<{}, {
         folder.open();
 
         this.showLayer('layers');
-        this.loadModel('DamagedHelmet');
+        this.loadModel('AnimatedCube');
     }
 
     loadModel = async (modelName: string) => {
@@ -100,6 +106,25 @@ class App extends React.Component<{}, {
 
     handleResize = (size: { width: number; height: number }) => {
         this.setState({ size });
+    }
+
+    handleFrame = (data: { duration: number; time: number; }) => {
+        this.setState({ timelineValue: (data.time % data.duration) / data.duration });
+    }
+
+    handlePauseTimeline = () => {
+        this.viewer.pauseTimeline();
+        this.setState({ timelinePaused: true });
+    }
+
+    handleStartTimeline = () => {
+        this.viewer.startTimeline();
+        this.setState({ timelinePaused: false });
+    }
+
+    handleChangeTimeline = (value: number) => {
+        this.viewer.pauseTimeline(value);
+        this.setState({ timelinePaused: true });
     }
 
     registerSW() {
@@ -157,7 +182,7 @@ class App extends React.Component<{}, {
     }
 
     render() {
-        const { loading, showLayers, size } = this.state;
+        const { loading, showLayers, size, timelinePaused, timelineValue } = this.state;
         return <>
             <Spin spinning={loading} style={{
                 position: 'fixed',
@@ -168,6 +193,13 @@ class App extends React.Component<{}, {
             }}>
                 <div id="viewer-container"></div>
                 {!loading && showLayers && <Layers size={size} />}
+                {/* <Slider> */}
+                <Timeline
+                    value={timelineValue}
+                    paused={timelinePaused}
+                    onPause={this.handlePauseTimeline}
+                    onStart={this.handleStartTimeline}
+                    onChange={this.handleChangeTimeline} />
             </Spin>
         </>
     }

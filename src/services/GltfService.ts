@@ -2,8 +2,8 @@
  * provide raw scene & nodes data in glTF
  */
 import { injectable } from 'inversify';
-import { GltfAsset, GltfLoader, resolveURL, GLTF_COMPONENT_TYPE_ARRAYS } from 'gltf-loader-ts';
-import { Node, Scene, Mesh, Material, Texture, BufferView, Accessor, GlTfId, Sampler } from 'gltf-loader-ts/lib/gltf';
+import { GltfAsset, GltfLoader, resolveURL, GLTF_COMPONENT_TYPE_ARRAYS, GLTF_ELEMENTS_PER_TYPE } from 'gltf-loader-ts';
+import { Node, Scene, Mesh, Material, Texture, BufferView, Accessor, GlTfId, Sampler, Animation } from 'gltf-loader-ts/lib/gltf';
 
 const loader: GltfLoader = new GltfLoader();
 
@@ -16,13 +16,14 @@ export interface IAttributeData {
 export interface IGltfService {
     load(uri: string): void;
     getScene(): Scene;
-    getNode(idx: number): Node;
-    getMesh(idx: number | undefined): Mesh;
-    getMaterial(idx: number): Material;
-    getTexture(idx: number): Texture;
-    getImage(idx: number): Promise<HTMLImageElement>;
-    getSampler(idx: number): Sampler;
-    getData(idx: number): Promise<IAttributeData>;
+    getNode(idx: GlTfId): Node;
+    getMesh(idx: GlTfId | undefined): Mesh;
+    getMaterial(idx: GlTfId): Material;
+    getTexture(idx: GlTfId): Texture;
+    getImage(idx: GlTfId): Promise<HTMLImageElement>;
+    getSampler(idx: GlTfId): Sampler;
+    getData(idx: GlTfId): Promise<IAttributeData>;
+    getAnimations(): Animation[];
 }
 
 @injectable()
@@ -35,6 +36,7 @@ export class GltfService implements IGltfService {
     private accessors: Accessor[] = [];
     private bufferViews: BufferView[] = [];
     private samplers: Sampler[] = [];
+    private animations: Animation[] = [];
     private scene: Scene;
 
     private bufferCache: {[key: string]: ArrayBuffer} = {};
@@ -45,7 +47,7 @@ export class GltfService implements IGltfService {
         this.asset = asset;
 
         const { nodes, scene: sceneIdx, scenes, meshes,
-            materials, textures, accessors, bufferViews, samplers } = asset.gltf;
+            materials, textures, accessors, bufferViews, samplers, animations } = asset.gltf;
         if (scenes && nodes) {
             this.scene = scenes[sceneIdx || 0];
             this.nodes = nodes;
@@ -67,6 +69,9 @@ export class GltfService implements IGltfService {
         }
         if (samplers) {
             this.samplers = samplers;
+        }
+        if (animations) {
+            this.animations = animations;
         }
     }
 
@@ -97,6 +102,10 @@ export class GltfService implements IGltfService {
     public getSampler(idx: GlTfId): Sampler {
         // TODO: fix sampler idx
         return this.samplers[0];
+    }
+
+    public getAnimations() {
+        return this.animations;
     }
 
     private async getBinData(index: GlTfId): Promise<ArrayBuffer> {
@@ -134,13 +143,16 @@ export class GltfService implements IGltfService {
 
         const bufferData = await this.getBinData(bufferView.buffer);
 
+        const bufferConstructor = GLTF_COMPONENT_TYPE_ARRAYS[accessor.componentType];
         const start = bufferView.byteOffset || 0;
         const end = start + bufferView.byteLength;
+        const subStart = (accessor.byteOffset || 0);
+        // const subEnd = subStart + accessor.count * GLTF_ELEMENTS_PER_TYPE[accessor.type] * bufferConstructor.BYTES_PER_ELEMENT;
+
         const slicedBuffer = bufferData
             .slice(start, end) // first slice per bufferview
-            .slice((accessor.byteOffset || 0)); // then slice per attribute
+            .slice(subStart); // then slice per attribute
 
-        const bufferConstructor = GLTF_COMPONENT_TYPE_ARRAYS[accessor.componentType];
         const bufferDataView = new bufferConstructor(slicedBuffer);
 
         return {
@@ -157,5 +169,6 @@ export class GltfService implements IGltfService {
         this.meshes = [];
         this.samplers = [];
         this.textures = [];
+        this.animations = [];
     }
 }

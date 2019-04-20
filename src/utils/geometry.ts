@@ -17,10 +17,11 @@ export function generateBarycentric(attributes: {
 
     // create empty typed array according to indices' num
     Object.keys(attributes).forEach(attributeName => {
-        const { componentType, attributeType } = attributes[attributeName];
+        const { componentType, attributeType, buffer } = attributes[attributeName];
         const size = GLTF_ELEMENTS_PER_TYPE[attributeType];
         const bufferConstructor = GLTF_COMPONENT_TYPE_ARRAYS[componentType];
         uniqueAttributes[attributeName] = {
+            // buffer
             buffer: new bufferConstructor(size * indiceNum)
         };
     });

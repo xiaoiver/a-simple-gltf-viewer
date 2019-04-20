@@ -28,12 +28,15 @@ export class BasePass implements IPass {
             frag: fs,
             vert: vs,
             attributes: {
+                // using a full-screen triangle
                 a_Position: [ -4, -4, 4, -4, 0, 4 ]
             },
             uniforms: {
                 ...uniforms,
                 //@ts-ignore
-                u_Texture: _regl.prop('texture')
+                u_Texture: _regl.prop('texture'),
+                //@ts-ignore
+                // u_Depth: _regl.prop('depth'),
             },
             depth: { enable: false },
             count: 3
@@ -46,7 +49,9 @@ export class BasePass implements IPass {
             : this._postProcessor.getOffscreenRenderTarget();
         getRenderTarget({}, () => {
             this.drawCommand({
-                texture: this._postProcessor.getReadFBO()
+                texture: this._postProcessor.getReadFBO(),
+                // @ts-ignore
+                // depth: this._postProcessor.getReadFBO().depth,
             });
         });
     }

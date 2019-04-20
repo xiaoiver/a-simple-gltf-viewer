@@ -12,7 +12,7 @@ self.__precacheManifest = (self.__precacheManifest || []).concat([
     "url": "pwacompat.min.js"
   },
   {
-    "revision": "3a18db4f22b46653e2c9",
+    "revision": "e3c27b27c059b17949d6",
     "url": "renderer.bundle.js"
   },
   {

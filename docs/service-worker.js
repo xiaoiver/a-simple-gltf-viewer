@@ -1,4 +1,4 @@
-importScripts("precache-manifest.50327a307e18ee37e664f4ddd80d2c3f.js", "workbox-v4.2.0/workbox-sw.js");
+importScripts("precache-manifest.31f0e08744284669892dcd5b8717329a.js", "workbox-v4.2.0/workbox-sw.js");
 workbox.setConfig({modulePathPrefix: "workbox-v4.2.0"});
 workbox.core.setCacheNameDetails({
     prefix: 'a-simple-gltf-viewer',

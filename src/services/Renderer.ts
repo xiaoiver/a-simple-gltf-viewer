@@ -18,6 +18,7 @@ import { IStyleService } from './Style';
 import { IPostProcessorService, IPass } from './PostProcessor';
 import { IWebGLContextService } from './Regl';
 import { container } from '@/inversify.config';
+import { ITimelineService } from './Timeline';
 
 const SHADOW_RES = 2048;
 
@@ -74,6 +75,7 @@ export class Renderer extends EventEmitter implements IRendererService {
     @inject(SERVICE_IDENTIFIER.CameraService) private _camera: ICameraService;
     @inject(SERVICE_IDENTIFIER.StyleService) private _style: IStyleService;
     @inject(SERVICE_IDENTIFIER.PostProcessorService) private _postProcessor: IPostProcessorService;
+    @inject(SERVICE_IDENTIFIER.TimelineService) private _timeline: ITimelineService;
 
     private prefixDefines(glsl: string, defines: any): string {
         const d = { ...this.defines, ...defines };
@@ -378,19 +380,26 @@ export class Renderer extends EventEmitter implements IRendererService {
             this._postProcessor.init();
             // this._postProcessor.add(container.get<IPass>(SERVICE_IDENTIFIER.BlurHPass));
             // this._postProcessor.add(container.get<IPass>(SERVICE_IDENTIFIER.BlurVPass));
+            // this._postProcessor.add(container.get<IPass>(SERVICE_IDENTIFIER.DoFPass));
             this._postProcessor.add(container.get<IPass>(SERVICE_IDENTIFIER.CopyPass));
 
             this.renderToPostProcessor = this._regl({
                 cull: {
                     enable: true
                 },
+                // depth: {
+                //     enable: true
+                // },
                 // since post-processor will swap read/write fbos, we must retrieve it dynamically
-                framebuffer: () => this._postProcessor.getReadFBO()
+                // framebuffer: () => this._postProcessor.getReadFBO()
             });
         }
 
         // rebuild scene graph
         await this._scene.init();
+
+        this._timeline.reset();
+        this._timeline.start();
 
         if (!this.inited) {
             // create draw ground & skybox command for later use
@@ -401,6 +410,7 @@ export class Renderer extends EventEmitter implements IRendererService {
                 this._regl.clear({
                     color: [1, 1, 1, 1],
                     depth: 1,
+                    // stencil: 0,
                     framebuffer: this.depthFBO
                 });
 
@@ -413,6 +423,7 @@ export class Renderer extends EventEmitter implements IRendererService {
                     this._regl.clear({
                         color: [1, 1, 1, 1],
                         depth: 1,
+                        // stencil: 0,
                         framebuffer: this._postProcessor.getReadFBO()
                     });
 
@@ -423,7 +434,7 @@ export class Renderer extends EventEmitter implements IRendererService {
                 });
 
                 // post-processing pass
-                this._postProcessor.render();
+                // this._postProcessor.render();
 
                 this.emit(Renderer.FRAME_EVENT);
             });
